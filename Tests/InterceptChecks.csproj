@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <BuildMod>false</BuildMod>
+    <OutputTmlReferences>true</OutputTmlReferences>
+  </PropertyGroup>
+  <Import Project="../../tModLoader.targets" />
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../Combat/Intercept.cs" Link="Intercept.cs" />
+    <Compile Include="Program.cs" />
+  </ItemGroup>
+</Project>

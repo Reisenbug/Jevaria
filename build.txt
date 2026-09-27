@@ -3,4 +3,4 @@ author = Reisenbug
 version = 0.1
 homepage = https://github.com/Reisenbug/Jevaria
 includeSource = true
-buildIgnore = *.csproj, *.md, .git*, obj\*, bin\*
+buildIgnore = *.csproj, *.md, .git*, obj\*, bin\*, Tests\*
