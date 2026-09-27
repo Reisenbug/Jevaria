@@ -228,6 +228,17 @@ public sealed class CombatPlayer : ModPlayer
         Status = "acting";
         Mod.Logger.Info($"decision #{answer.Sequence}: {answer.Intent}; " +
             $"latency={answer.LatencyMs}ms; previous_action={previousAgeMs}ms; probabilities={JsonSerializer.Serialize(answer.Probabilities)}");
+        string horizontal = answer.Intent.Horizontal switch
+        {
+            Direction.Negative => "←", Direction.Positive => "→", _ => "·"
+        };
+        string vertical = answer.Intent.Vertical switch
+        {
+            Direction.Negative => "↑", Direction.Positive => "↓", _ => "·"
+        };
+        Main.NewText($"[Jev #{answer.Sequence}] {horizontal}{vertical} " +
+            $"{answer.Intent.HorizontalMagnitude}/{answer.Intent.VerticalMagnitude}" +
+            (answer.Intent.Dash ? " dash" : "") + $" {answer.LatencyMs}ms", Color.Orange);
     }
 
     public override void OnHurt(Player.HurtInfo info)

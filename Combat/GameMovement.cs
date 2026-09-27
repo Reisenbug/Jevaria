@@ -12,6 +12,10 @@ public sealed class GameMovement : IMovementDriver
     private ulong _dropSequence;
     private float _dropStartY;
     private int _dropTicks;
+    private bool _autoHookActive;
+    private ulong _hookIssuedTick;
+    private ulong _hookCooldownUntil;
+    private Vector2 _hookTarget;
 
     public ActionResult Apply(Player player, DodgeIntent intent, CombatSnapshot snapshot)
     {
@@ -41,13 +45,25 @@ public sealed class GameMovement : IMovementDriver
             if (vertical == Direction.Positive) { vertical = Direction.None; vMagnitude = Magnitude.None; reason = "lower boundary"; }
         }
 
+        bool wantHook = (horizontal != Direction.None && hMagnitude == Magnitude.Large) ||
+                        (vertical == Direction.Negative && vMagnitude >= Magnitude.Medium);
+        if (_autoHookActive && (!wantHook ||
+            Main.GameUpdateCount - _hookIssuedTick >= 45 ||
+            player.grapCount > 0 && Vector2.Distance(player.Center, _hookTarget) < 48f))
+        {
+            Release(player);
+            reason = "grapple released";
+        }
+        if (player.grapCount > 0 && !_autoHookActive && reason != "grapple released")
+            return new ActionResult(intent, DodgeIntent.Idle, "manual grapple");
+
         player.controlLeft = horizontal == Direction.Negative;
         player.controlRight = horizontal == Direction.Positive;
         player.controlUp = vertical == Direction.Negative;
         player.controlDown = vertical == Direction.Positive;
         player.controlJump = false;
 
-        if (vertical == Direction.Negative)
+        if (vertical == Direction.Negative && !(_autoHookActive && player.grapCount > 0))
         {
             player.controlJump = true;
             if (vMagnitude >= Magnitude.Medium && !snapshot.HasHook && !snapshot.CanFly)
@@ -56,7 +72,8 @@ public sealed class GameMovement : IMovementDriver
                 reason = "no vertical ability";
             }
         }
-        else if (horizontal != Direction.None && hMagnitude >= Magnitude.Medium)
+        else if (!(_autoHookActive && player.grapCount > 0) &&
+            horizontal != Direction.None && hMagnitude >= Magnitude.Medium)
         {
             if (snapshot.CanDoubleJump)
                 player.controlJump = true;
@@ -85,13 +102,15 @@ public sealed class GameMovement : IMovementDriver
                 player.controlDown = false;
         }
 
-        bool wantHook = (horizontal != Direction.None && hMagnitude == Magnitude.Large) ||
-                        (vertical == Direction.Negative && vMagnitude >= Magnitude.Medium);
-        if (wantHook && _hookSequence != snapshot.Sequence)
+        if (wantHook && !_autoHookActive && player.grapCount == 0 &&
+            Main.GameUpdateCount >= _hookCooldownUntil && _hookSequence != snapshot.Sequence)
         {
             _hookSequence = snapshot.Sequence;
             if (snapshot.HasHook && TryHookPoint(player, horizontal, vertical, out Vector2 hook))
             {
+                _autoHookActive = true;
+                _hookIssuedTick = Main.GameUpdateCount;
+                _hookTarget = hook;
                 Main.mouseX = (int)(hook.X - Main.screenPosition.X);
                 Main.mouseY = (int)(hook.Y - Main.screenPosition.Y);
                 player.releaseHook = true;
@@ -129,6 +148,10 @@ public sealed class GameMovement : IMovementDriver
 
     public void Release(Player player)
     {
+        if (!_autoHookActive) return;
+        player.RemoveAllGrapplingHooks();
+        _autoHookActive = false;
+        _hookCooldownUntil = Main.GameUpdateCount + 30;
     }
 
     private static bool TryHookPoint(Player player, Direction horizontal,
