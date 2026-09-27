@@ -145,7 +145,7 @@ public sealed class CombatPlayer : ModPlayer
             Status = _snapshot == null ? "waiting for boss" : "dodge off";
         }
 
-        if (_snapshot == null || (DodgeEnabled && Decision == null))
+        if (_snapshot == null)
         {
             _movement.Release(Player);
             _attack.Release(Player);
@@ -153,7 +153,7 @@ public sealed class CombatPlayer : ModPlayer
             return;
         }
 
-        if (DodgeEnabled && !manualInput)
+        if (DodgeEnabled && Decision != null && !manualInput)
         {
             LastAction = _movement.Apply(Player, Decision!.Intent, _snapshot);
             if (LastAction.Reason != _lastActionReason)
