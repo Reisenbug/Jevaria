@@ -51,9 +51,10 @@ public interface IMovementDriver
     void Release(Player player);
 }
 
-public interface IAimDriver
+public interface IAttackDriver
 {
-    bool TryAim(Player player, CombatSnapshot snapshot, out Vector2 target);
+    bool TryAttack(Player player, CombatSnapshot snapshot, out Vector2 target);
+    void Release(Player player);
 }
 
 public interface IDodgeBrain

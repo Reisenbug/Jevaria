@@ -14,7 +14,7 @@ public sealed class CombatPlayer : ModPlayer
 {
     private readonly ICombatSensor _sensor = new GameSensor();
     private readonly IMovementDriver _movement = new GameMovement();
-    private readonly IAimDriver _aim = new ProjectileAim();
+    private readonly IAttackDriver _attack = new ProjectileAim();
     private CancellationTokenSource? _cancellation;
     private Task<DodgeDecision>? _request;
     private CombatSnapshot? _snapshot;
@@ -52,6 +52,7 @@ public sealed class CombatPlayer : ModPlayer
         AimTarget = null;
         _activeSince = 0;
         _movement.Release(Player);
+        _attack.Release(Player);
     }
 
     public override void SetControls()
@@ -62,6 +63,7 @@ public sealed class CombatPlayer : ModPlayer
         if (Player.dead || Main.gameMenu || Main.playerInventory)
         {
             _movement.Release(Player);
+            _attack.Release(Player);
             Status = "paused";
             return;
         }
@@ -76,6 +78,7 @@ public sealed class CombatPlayer : ModPlayer
             {
                 Decision = null;
                 _movement.Release(Player);
+                _attack.Release(Player);
                 Status = "waiting for boss";
                 return;
             }
@@ -95,6 +98,7 @@ public sealed class CombatPlayer : ModPlayer
         if (Decision == null || _snapshot == null)
         {
             _movement.Release(Player);
+            _attack.Release(Player);
             return;
         }
 
@@ -105,13 +109,18 @@ public sealed class CombatPlayer : ModPlayer
             if (_lastActionReason.Length > 0)
                 Mod.Logger.Info($"action #{Decision.Sequence}: {_lastActionReason}; applied={LastAction.Applied}");
         }
-        if (LastAction.Reason == "grapple") return;
+        if (LastAction.Reason == "grapple")
+        {
+            _attack.Release(Player);
+            return;
+        }
 
         NPC boss = Main.npc[_snapshot.Boss.Id];
         if (!boss.active || !boss.boss)
         {
             Decision = null;
             _movement.Release(Player);
+            _attack.Release(Player);
             Status = "boss gone";
             return;
         }
@@ -121,14 +130,15 @@ public sealed class CombatPlayer : ModPlayer
             Center = boss.Center,
             Velocity = boss.velocity
         };
-        if (_aim.TryAim(Player, _snapshot with { Boss = liveBoss }, out Vector2 target))
+        if (_attack.TryAttack(Player, _snapshot with { Boss = liveBoss }, out Vector2 target))
         {
             AimTarget = target;
-            Main.mouseX = (int)(target.X - Main.screenPosition.X);
-            Main.mouseY = (int)(target.Y - Main.screenPosition.Y);
-            Player.controlUseItem = true;
         }
-        else AimTarget = null;
+        else
+        {
+            AimTarget = null;
+            _attack.Release(Player);
+        }
     }
 
     private void ReceiveDecision()
