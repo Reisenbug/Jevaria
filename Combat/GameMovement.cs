@@ -66,10 +66,9 @@ public sealed class GameMovement : IMovementDriver
     private bool _jumpHeld;
     private int _jumpTicks;
     private ulong _hookIssuedTick;
+    private ulong _hookLatchedTick;
     private ulong _hookCooldownUntil;
     private Vector2 _hookTarget;
-    private float _previousHookDistance = float.MaxValue;
-    private bool _hookPulled;
     private bool _autoMountActive;
     private bool _autoMountForDown;
     private bool _mountRiseSeen;
@@ -132,26 +131,26 @@ public sealed class GameMovement : IMovementDriver
         bool horizontalHook = horizontal != 0 && horizontalSize == Magnitude.Medium;
         bool verticalHook = vertical < 0 && verticalSize >= Magnitude.Medium;
         bool wantHook = !downMount && (horizontalHook || verticalHook);
-        float hookDistance = Vector2.Distance(player.Center, _hookTarget);
-        if (_autoHookActive && player.grapCount > 0 && !_hookPulled &&
-            hookDistance < _previousHookDistance - 0.1f)
+        bool hookJump = _autoHookActive && _hookLatchedTick > 0 &&
+            player.grapCount > 0 && Main.GameUpdateCount > _hookLatchedTick;
+        bool hookFinished = _autoHookActive && _hookLatchedTick > 0 && player.grapCount == 0;
+        if (_autoHookActive && player.grapCount > 0 && _hookLatchedTick == 0)
         {
-            _hookPulled = true;
-            reason = "grapple pulling";
+            _hookLatchedTick = Main.GameUpdateCount;
+            _jumpHeld = false;
+            reason = "grapple latched";
         }
-        bool hookFinished = _autoHookActive && player.grapCount > 0 && _hookPulled &&
-            hookDistance >= _previousHookDistance - 0.1f;
-        if (_autoHookActive && (!wantHook ||
-            Main.GameUpdateCount - _hookIssuedTick >= 45 || hookFinished))
+        if (hookFinished) FinishAutoHook();
+        else if (_autoHookActive && _hookLatchedTick == 0 &&
+            (!wantHook || Main.GameUpdateCount - _hookIssuedTick >= 45))
         {
             Release(player);
-            reason = "grapple released";
+            reason = "grapple missed";
         }
-        if (_autoHookActive && player.grapCount > 0) _previousHookDistance = hookDistance;
-        if (player.grapCount > 0 && !_autoHookActive && reason != "grapple released")
+        if (player.grapCount > 0 && !_autoHookActive)
             return new ActionResult(intent, DodgeIntent.Idle, "manual grapple");
 
-        if (wantHook && !_autoHookActive && player.grapCount == 0 &&
+        if (wantHook && !_autoHookActive && !hookFinished && player.grapCount == 0 &&
             Main.GameUpdateCount >= _hookCooldownUntil && _hookSequence != snapshot.Sequence)
         {
             _hookSequence = snapshot.Sequence;
@@ -160,9 +159,8 @@ public sealed class GameMovement : IMovementDriver
             {
                 _autoHookActive = true;
                 _hookIssuedTick = Main.GameUpdateCount;
+                _hookLatchedTick = 0;
                 _hookTarget = hook;
-                _previousHookDistance = float.MaxValue;
-                _hookPulled = false;
                 Main.mouseX = (int)(hook.X - Main.screenPosition.X);
                 Main.mouseY = (int)(hook.Y - Main.screenPosition.Y);
                 player.releaseHook = true;
@@ -189,7 +187,13 @@ public sealed class GameMovement : IMovementDriver
             }
         }
         else player.controlHook = false;
-        if (wantHook && !_autoHookActive &&
+        if (hookJump)
+        {
+            player.controlHook = false;
+            player.releaseJump = true;
+            reason = "grapple jump cancel";
+        }
+        if (wantHook && !_autoHookActive && !hookFinished &&
             (horizontalSize == Magnitude.Medium || verticalSize >= Magnitude.Medium))
         {
             if (horizontalHook) horizontalSize = Magnitude.Small;
@@ -197,14 +201,15 @@ public sealed class GameMovement : IMovementDriver
             reason = "grapple unavailable";
         }
 
-        bool canJump = !(_autoHookActive && player.grapCount > 0);
+        bool canJump = !_autoHookActive || player.grapCount == 0;
         player.controlLeft = horizontal < 0;
         player.controlRight = horizontal > 0;
         player.controlUp = player.grapCount == 0 && vertical < 0;
         player.controlDown = player.grapCount == 0 && vertical > 0;
         bool useExtraJump = canJump && vertical < 0 &&
             snapshot.CanDoubleJump && _jumpSequence != snapshot.Sequence;
-        player.controlJump = ApplyJump(player, canJump && vertical < 0, useExtraJump, snapshot.Sequence);
+        player.controlJump = hookJump || ApplyJump(player, canJump && vertical < 0,
+            useExtraJump, snapshot.Sequence);
         if (upMount && !_autoMountActive && _upMountSequence != snapshot.Sequence &&
             player.controlJump && (player.velocity.Y <= 0f || hookFinished) &&
             (!_autoHookActive && player.grapCount == 0 || hookFinished))
@@ -267,10 +272,20 @@ public sealed class GameMovement : IMovementDriver
         _jumpTicks = 0;
         DismountAuto(player);
         if (!_autoHookActive) return;
-        player.RemoveAllGrapplingHooks();
+        if (_hookLatchedTick > 0 && player.grapCount > 0)
+        {
+            player.releaseJump = true;
+            player.controlJump = true;
+        }
+        else player.RemoveAllGrapplingHooks();
+        FinishAutoHook();
+    }
+
+    private void FinishAutoHook()
+    {
         _autoHookActive = false;
         _hookHeld = false;
-        _hookPulled = false;
+        _hookLatchedTick = 0;
         _hookCooldownUntil = Main.GameUpdateCount + 30;
     }
 
@@ -338,7 +353,9 @@ public sealed class GameMovement : IMovementDriver
                 Tile tile = Main.tile[x, y];
                 if (!tile.HasTile || tile.IsActuated ||
                     !Main.tileSolid[tile.TileType] && tile.TileType != TileID.MinecartTrack) continue;
-                target = new Vector2(x * 16f + 8f, y * 16f + 8f);
+                Vector2 found = new(x * 16f + 8f, y * 16f + 8f);
+                if (Vector2.DistanceSquared(player.Center, found) <= 6f * 16f * 6f * 16f) break;
+                target = found;
                 return true;
             }
         }
