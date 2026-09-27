@@ -2,9 +2,9 @@
 
 Jev 驱动的 Terraria Boss 战实验模组。Jev 每次选择一条躲避方向和幅度；模组读取战况、执行按键并用弹速与 Boss 速度计算提前量。
 
-## 下载
+## Release
 
-从 [GitHub Releases](https://github.com/Reisenbug/Jevaria/releases) 下载 `Jevaria.tmod`，放入 tModLoader 的 `Mods` 目录并在游戏内启用。Release 中的 `Jevaria.dll` 是编译后的程序集，不能代替 `.tmod` 直接安装。
+[GitHub Releases](https://github.com/Reisenbug/Jevaria/releases) 提供编译后的 `Jevaria.dll`。DLL 供查看或集成，不能直接放进 tModLoader 的 `Mods` 目录安装；游戏内使用请按下文从源码构建模组。
 
 ## 运行
 
