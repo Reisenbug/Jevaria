@@ -1,12 +1,14 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Xna.Framework;
 using Terraria.ModLoader.Config;
 
 namespace Jevaria.Combat;
@@ -26,7 +28,9 @@ public sealed class JevariaConfig : ModConfig
         "at or below 8 pixels means a one-way platform is directly underfoot; moving " +
         "down passes through it. Vary height in both directions when evading; do not " +
         "treat vertical movement as only climbing. Positions are pixels and " +
-        "velocities are pixels per game tick. Each action lasts until the next Jev answer, " +
+        "velocities are pixels per game tick. `frames_until_player_contact` estimates " +
+        "time to collision if current velocities continue; -1 means no predicted collision. " +
+        "Incoming projectiles are ordered by predicted contact time. Each action lasts until the next Jev answer, " +
         "usually about 300 ms. Choose direction and strength for each axis using the " +
         "available abilities. Request a dash only if available and useful now.";
 
@@ -89,11 +93,17 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
             instruction,
             player = snapshot.Player,
             health = snapshot.Health,
-            boss = snapshot.Boss,
-            bosses = snapshot.Bosses,
+            boss = Threat(snapshot.Boss, snapshot),
+            bosses = snapshot.Bosses.Select(boss => Threat(boss, snapshot)).ToArray(),
             boss_motion = snapshot.BossMotion,
-            parts = snapshot.Parts,
-            projectiles = snapshot.Projectiles,
+            parts = snapshot.Parts.Select(part => Threat(part, snapshot)).ToArray(),
+            projectiles = snapshot.Projectiles
+                .Select(projectile => (Entity: projectile, Frames: FramesUntilContact(projectile, snapshot.Player)))
+                .Where(item => item.Frames >= 0 ||
+                    Vector2.DistanceSquared(item.Entity.Center, snapshot.Player.Center) <= 96f * 96f)
+                .OrderBy(item => item.Frames < 0 ? int.MaxValue : item.Frames)
+                .Take(12)
+                .Select(item => Threat(item.Entity, snapshot)).ToArray(),
             solid_distances = snapshot.SolidDistances,
             world_distances = snapshot.WorldDistances,
             platform_distance_below = snapshot.PlatformDistanceBelow,
@@ -109,19 +119,25 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
         {
             ["horizontal"] = Choice("Which horizontal direction should the player move now?", new
             {
-                left = "Move left to avoid danger and keep room for the next action",
+                left = snapshot.WorldDistances.Left < 80f || snapshot.SolidDistances.Left < 32f
+                    ? "Blocked by the world edge or a nearby wall; do not choose left"
+                    : "Move left to avoid danger and keep room for the next action",
                 none = "No horizontal movement is useful now",
-                right = "Move right to avoid danger and keep room for the next action"
+                right = snapshot.WorldDistances.Right < 80f || snapshot.SolidDistances.Right < 32f
+                    ? "Blocked by the world edge or a nearby wall; do not choose right"
+                    : "Move right to avoid danger and keep room for the next action"
             }),
             ["vertical"] = Choice("Which vertical direction should the player move now?", new
             {
-                up = snapshot.SolidDistances.Up < 24f
+                up = snapshot.WorldDistances.Up < 64f || snapshot.SolidDistances.Up < 24f
                     ? "Blocked by a solid ceiling; do not choose up"
                     : snapshot.SolidDistances.Up < 64f
                         ? "Very little room above; choose up only to avoid an immediate threat there"
                         : "Move upward to avoid danger and keep room for the next action",
                 none = "No vertical movement is useful now",
-                down = snapshot.PlatformDistanceBelow <= 8f
+                down = snapshot.WorldDistances.Down < 64f || snapshot.SolidDistances.Down < 24f
+                    ? "Blocked by the world bottom or solid ground; do not choose down"
+                    : snapshot.PlatformDistanceBelow <= 8f
                     ? "A one-way platform is directly underfoot; move down to drop below it if the space below is safe"
                     : snapshot.SolidDistances.Up < 64f
                         ? "Descend away from the ceiling if the path is safe; down passes through platforms"
@@ -200,6 +216,42 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
 
     private static object Choice(string instructions, object criteria)
         => new { type = "choice", instructions, criteria };
+
+    private static object Threat(CombatEntity entity, CombatSnapshot snapshot)
+        => new
+        {
+            entity.Id,
+            entity.Name,
+            entity.Center,
+            entity.Velocity,
+            entity.Size,
+            entity.Damage,
+            cells_right_of_player = (entity.Center.X - snapshot.Player.Center.X) / 16f,
+            cells_above_player = (snapshot.Player.Center.Y - entity.Center.Y) / 16f,
+            speed_to_the_right_cells_per_second = entity.Velocity.X * 60f / 16f,
+            speed_upward_cells_per_second = -entity.Velocity.Y * 60f / 16f,
+            damage_percent_of_current_health = entity.Damage * 100f / Math.Max(1, snapshot.Health),
+            frames_until_player_contact = FramesUntilContact(entity, snapshot.Player)
+        };
+
+    private static int FramesUntilContact(CombatEntity entity, CombatEntity player)
+    {
+        float dx = entity.Center.X - player.Center.X;
+        float dy = entity.Center.Y - player.Center.Y;
+        float gapX = Math.Abs(dx) - (entity.Size.X + player.Size.X) * 0.5f;
+        float gapY = Math.Abs(dy) - (entity.Size.Y + player.Size.Y) * 0.5f;
+        if (gapX <= 0f && gapY <= 0f) return 0;
+
+        float relativeX = entity.Velocity.X - player.Velocity.X;
+        float relativeY = entity.Velocity.Y - player.Velocity.Y;
+        float closeX = dx > 0f ? -relativeX : relativeX;
+        float closeY = dy > 0f ? -relativeY : relativeY;
+        float framesX = gapX <= 0f ? 0f : closeX > 0.1f ? gapX / closeX : -1f;
+        float framesY = gapY <= 0f ? 0f : closeY > 0.1f ? gapY / closeY : -1f;
+        if (framesX < 0f || framesY < 0f) return -1;
+        float frames = Math.Max(framesX, framesY);
+        return frames > 600f ? -1 : (int)frames;
+    }
 
     private static string ChoiceValue(JsonElement answers, string name)
         => answers.GetProperty(name).GetProperty("choice").GetString()
