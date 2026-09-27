@@ -23,6 +23,8 @@ public sealed class CombatPlayer : ModPlayer
     private ulong _nextRequestTick;
     private long _activeSince;
     private string _lastActionReason = "";
+    private DodgeIntent _lastCompletedIntent = DodgeIntent.Idle;
+    private long _lastCompletedDurationMs;
 
     public bool Enabled { get; private set; } = true;
     public bool DodgeEnabled { get; private set; } = true;
@@ -55,6 +57,8 @@ public sealed class CombatPlayer : ModPlayer
         Decision = null;
         AimTarget = null;
         _activeSince = 0;
+        _lastCompletedIntent = DodgeIntent.Idle;
+        _lastCompletedDurationMs = 0;
         _movement.Release(Player);
         _attack.Release(Player);
         _attack.RestoreWeapon(Player);
@@ -67,6 +71,8 @@ public sealed class CombatPlayer : ModPlayer
         _request = null;
         Decision = null;
         _activeSince = 0;
+        _lastCompletedIntent = DodgeIntent.Idle;
+        _lastCompletedDurationMs = 0;
         _nextRequestTick = Main.GameUpdateCount;
         _lastActionReason = "";
         _movement.Release(Player);
@@ -120,12 +126,14 @@ public sealed class CombatPlayer : ModPlayer
         if (DodgeEnabled && _request == null && Main.GameUpdateCount >= _nextRequestTick)
         {
             _snapshot = _sensor.Capture(Player, ++_sequence,
-                Decision?.Intent ?? DodgeIntent.Idle, ActionAgeMs);
+                _lastCompletedIntent, _lastCompletedDurationMs);
             if (_snapshot == null)
             {
                 if (Decision != null)
                     Mod.Logger.Info($"combat ended: tick={Main.GameUpdateCount}; health={Player.statLife}");
                 Decision = null;
+                _lastCompletedIntent = DodgeIntent.Idle;
+                _lastCompletedDurationMs = 0;
                 _movement.Release(Player);
                 _attack.Release(Player);
                 Status = "waiting for boss";
@@ -175,7 +183,11 @@ public sealed class CombatPlayer : ModPlayer
                 return;
             }
         }
-        else _movement.Release(Player);
+        else
+        {
+            _movement.Release(Player);
+            LastAction = new ActionResult(DodgeIntent.Idle, DodgeIntent.Idle, "");
+        }
 
         NPC boss = Main.npc[_snapshot.Boss.Id];
         if (!boss.active || !boss.boss)
@@ -230,6 +242,9 @@ public sealed class CombatPlayer : ModPlayer
             return;
         }
         long previousAgeMs = ActionAgeMs;
+        _lastCompletedIntent = Decision is not null && LastAction.Applied.Valid
+            ? LastAction.Applied : DodgeIntent.Idle;
+        _lastCompletedDurationMs = Decision is null ? 0 : previousAgeMs;
         Decision = answer;
         _activeSince = Stopwatch.GetTimestamp();
         Status = "acting";
