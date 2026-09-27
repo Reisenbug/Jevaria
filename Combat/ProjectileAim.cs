@@ -24,5 +24,5 @@ public sealed class ProjectileAim : IAttackDriver
         return true;
     }
 
-    public void Release(Player player) => player.controlUseItem = false;
+    public void Release(Player player) { }
 }

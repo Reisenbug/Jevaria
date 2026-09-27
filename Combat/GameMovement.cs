@@ -129,9 +129,6 @@ public sealed class GameMovement : IMovementDriver
 
     public void Release(Player player)
     {
-        player.controlLeft = player.controlRight = false;
-        player.controlUp = player.controlDown = false;
-        player.controlJump = player.controlHook = false;
     }
 
     private static bool TryHookPoint(Player player, Direction horizontal,
