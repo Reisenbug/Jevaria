@@ -271,7 +271,7 @@ public sealed class CombatPlayer : ModPlayer
             DodgeDirection.UpLeft => "↖",
             _ => "·"
         };
-        Main.NewText($"[Jev #{answer.Sequence}] {direction} {answer.Intent.Size}" +
+        Main.NewText($"[Jev #{answer.Sequence}] {direction} H:{answer.Intent.HorizontalSize} V:{answer.Intent.VerticalSize}" +
             (answer.Intent.Dash ? " dash" : "") + $" {answer.LatencyMs}ms", Color.Orange);
     }
 

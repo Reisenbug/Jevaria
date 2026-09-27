@@ -29,7 +29,8 @@ public sealed class GameMovement : IMovementDriver
         if (!intent.Valid) return new ActionResult(intent, DodgeIntent.Idle, "invalid intent");
 
         (int horizontal, int vertical) = Components(intent.Direction);
-        Magnitude size = intent.Size;
+        Magnitude horizontalSize = intent.HorizontalSize;
+        Magnitude verticalSize = intent.VerticalSize;
         string reason = "";
         Rectangle box = player.Hitbox;
         BoundaryDistances solid = GameSensor.ScanSolids(box);
@@ -53,17 +54,29 @@ public sealed class GameMovement : IMovementDriver
         }
 
         bool slimeEquipped = player.miscEquips[3].type == ItemID.SlimySaddle;
-        bool upMount = slimeEquipped && intent.Direction == DodgeDirection.Up && vertical < 0 && size == Magnitude.Large;
-        bool downMount = slimeEquipped && intent.Direction == DodgeDirection.Down && vertical > 0 && size == Magnitude.Large;
+        if (verticalSize == Magnitude.Large && !slimeEquipped)
+        {
+            verticalSize = vertical < 0 ? Magnitude.Medium : Magnitude.Small;
+            reason = "slime mount unavailable";
+        }
+        bool upMount = slimeEquipped && vertical < 0 && verticalSize == Magnitude.Large;
+        bool downMount = slimeEquipped && vertical > 0 && verticalSize == Magnitude.Large;
+        if (downMount && horizontalSize == Magnitude.Medium)
+        {
+            horizontalSize = Magnitude.Small;
+            reason = "horizontal grapple unavailable while mounted";
+        }
         if (_autoMountActive && downMount) _autoMountForDown = true;
         if (_autoMountActive && ((!upMount && !downMount) || upMount && _autoMountForDown ||
             !_autoMountForDown && (_mountRiseSeen && player.velocity.Y >= 0f ||
             !_mountRiseSeen && Main.GameUpdateCount - _mountStartTick > 6)))
             DismountAuto(player);
 
-        bool moving = horizontal != 0 || vertical != 0;
-        if (!moving) size = Magnitude.None;
-        bool wantHook = moving && size == Magnitude.Large && !downMount;
+        if (horizontal == 0) horizontalSize = Magnitude.None;
+        if (vertical == 0) verticalSize = Magnitude.None;
+        bool horizontalHook = horizontal != 0 && horizontalSize == Magnitude.Medium;
+        bool verticalHook = vertical < 0 && verticalSize >= Magnitude.Medium;
+        bool wantHook = !downMount && (horizontalHook || verticalHook);
         float hookDistance = Vector2.Distance(player.Center, _hookTarget);
         if (_autoHookActive && player.grapCount > 0 && hookDistance < _previousHookDistance - 0.1f)
             _hookPulled = true;
@@ -83,7 +96,8 @@ public sealed class GameMovement : IMovementDriver
             Main.GameUpdateCount >= _hookCooldownUntil && _hookSequence != snapshot.Sequence)
         {
             _hookSequence = snapshot.Sequence;
-            if (snapshot.HasHook && TryHookPoint(player, horizontal, vertical, out Vector2 hook))
+            if (snapshot.HasHook && TryHookPoint(player, horizontalHook ? horizontal : 0,
+                verticalHook ? vertical : 0, horizontalHook && !verticalHook, out Vector2 hook))
             {
                 _autoHookActive = true;
                 _hookIssuedTick = Main.GameUpdateCount;
@@ -99,7 +113,8 @@ public sealed class GameMovement : IMovementDriver
             }
             else
             {
-                size = Magnitude.Medium;
+                if (horizontalHook) horizontalSize = Magnitude.Small;
+                if (verticalSize >= Magnitude.Medium && !upMount) verticalSize = Magnitude.Small;
                 reason = "grapple unavailable";
             }
         }
@@ -115,24 +130,20 @@ public sealed class GameMovement : IMovementDriver
             }
         }
         else player.controlHook = false;
-        if (wantHook && !_autoHookActive && size == Magnitude.Large)
+        if (wantHook && !_autoHookActive &&
+            (horizontalSize == Magnitude.Medium || verticalSize >= Magnitude.Medium))
         {
-            size = Magnitude.Medium;
+            if (horizontalHook) horizontalSize = Magnitude.Small;
+            if (verticalSize >= Magnitude.Medium && !upMount) verticalSize = Magnitude.Small;
             reason = "grapple unavailable";
         }
 
         bool canJump = !(_autoHookActive && player.grapCount > 0);
-        if (vertical < 0 && size == Magnitude.Medium && !snapshot.CanDoubleJump)
-        {
-            size = Magnitude.Small;
-            reason = "extra jump unavailable";
-        }
         player.controlLeft = horizontal < 0;
         player.controlRight = horizontal > 0;
-        player.controlUp = player.grapCount == 0 &&
-            (vertical < 0 || vertical == 0 && player.velocity.Y != 0f);
+        player.controlUp = player.grapCount == 0 && vertical < 0;
         player.controlDown = player.grapCount == 0 && vertical > 0;
-        bool useExtraJump = canJump && vertical < 0 && size == Magnitude.Medium &&
+        bool useExtraJump = canJump && vertical < 0 &&
             snapshot.CanDoubleJump && _jumpSequence != snapshot.Sequence;
         player.controlJump = ApplyJump(player, canJump && vertical < 0, useExtraJump, snapshot.Sequence);
         if (upMount && !_autoMountActive && _upMountSequence != snapshot.Sequence &&
@@ -149,7 +160,7 @@ public sealed class GameMovement : IMovementDriver
             reason = "slime mount descent";
         if (_autoMountActive && !_autoMountForDown && player.velocity.Y < -0.1f)
             _mountRiseSeen = true;
-        var applied = new DodgeIntent(Compose(horizontal, vertical), moving ? size : Magnitude.None, false);
+        var applied = new DodgeIntent(Compose(horizontal, vertical), horizontalSize, verticalSize, false);
         return new ActionResult(intent, applied, reason);
     }
 
@@ -239,23 +250,26 @@ public sealed class GameMovement : IMovementDriver
     }
 
     private static bool TryHookPoint(Player player, int horizontal,
-        int vertical, out Vector2 target)
+        int vertical, bool nearHorizontal, out Vector2 target)
     {
         target = default;
         float range = HookRange(player);
         if (range <= 0f) return false;
-        Vector2 step = Vector2.Normalize(new Vector2(horizontal, vertical)) * 4f;
-        Vector2 point = player.Center;
-        for (float distance = 0f; distance <= range; distance += 4f, point += step)
+        foreach (float tilt in nearHorizontal ? new[] { 0f, -0.35f, 0.35f } : new[] { 0f })
         {
-            int x = (int)(point.X / 16f);
-            int y = (int)(point.Y / 16f);
-            if (!WorldGen.InWorld(x, y, 2)) break;
-            Tile tile = Main.tile[x, y];
-            if (!tile.HasTile || tile.IsActuated ||
-                !Main.tileSolid[tile.TileType] && tile.TileType != TileID.MinecartTrack) continue;
-            target = new Vector2(x * 16f + 8f, y * 16f + 8f);
-            return true;
+            Vector2 step = Vector2.Normalize(new Vector2(horizontal, nearHorizontal ? tilt : vertical)) * 4f;
+            Vector2 point = player.Center;
+            for (float distance = 0f; distance <= range; distance += 4f, point += step)
+            {
+                int x = (int)(point.X / 16f);
+                int y = (int)(point.Y / 16f);
+                if (!WorldGen.InWorld(x, y, 2)) break;
+                Tile tile = Main.tile[x, y];
+                if (!tile.HasTile || tile.IsActuated ||
+                    !Main.tileSolid[tile.TileType] && tile.TileType != TileID.MinecartTrack) continue;
+                target = new Vector2(x * 16f + 8f, y * 16f + 8f);
+                return true;
+            }
         }
         return false;
     }

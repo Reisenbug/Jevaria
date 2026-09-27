@@ -97,13 +97,20 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
         var questions = new Dictionary<string, object>
         {
             ["direction"] = Choice("Terraria boss fight. Which way should I move right now so that nothing hits me? Look at every boss part and shot, where each is heading and how soon it reaches me, and how much room I have. Frames until contact assumes our current velocities stay constant; use enemy health to identify its phase. Keep an escape route: do not run into a wall, floor or ceiling, or toward another threat. Follow the boss notes.", DirectionCriteria(snapshot)),
-            ["size"] = Choice("Same moment. Choose the movement tool needed for the direction you chose. These choices do not limit travel distance; movement continues until the next answer.", new Dictionary<string, string>
+            ["horizontal_size"] = Choice("Same moment. Choose the horizontal movement tool. Choose None if the chosen direction has no horizontal component. This does not limit travel distance.", new Dictionary<string, string>
             {
-                ["Small"] = "Run, jump, fly or fall in the chosen direction. No dash or grapple. I can change direction on the next answer. Use this when ordinary movement is enough, even for a long retreat.",
-                ["Medium"] = "Trigger an extra jump when moving up or up diagonally; diagonal jumps can also move me sideways. There is no dash. Sideways and downward Medium move exactly like Small, so choose Small for those directions. Use Medium only when an extra upward jump is needed to avoid an imminent hit.",
+                ["None"] = "No horizontal movement.",
+                ["Small"] = "Run left or right. Use this for ordinary movement, even for a long retreat.",
+                ["Medium"] = "Run left or right and use a nearly horizontal grappling hook if a reachable surface is available. Choose only when a hook is needed."
+            }),
+            ["vertical_size"] = Choice("Same moment. Choose the vertical movement tool. Choose None if the chosen direction has no vertical component. This does not limit travel distance.", new Dictionary<string, string>
+            {
+                ["None"] = "No vertical movement.",
+                ["Small"] = "Up: jump, fly or use an available extra jump while holding W. Down: hold S to descend or pass through a platform.",
+                ["Medium"] = "Up: grapple if possible, then jump or use an extra jump while holding W. Down: same as Small; choose Small.",
                 ["Large"] = snapshot.HasMount
-                    ? "With Slimy Saddle equipped: straight Up grapples if possible, then mounts while jumping and dismounts when the rise ends; straight Down mounts and holds down, then dismounts when the action ends. Sideways and diagonal Large only grapple. Use Large for an urgent vertical move or a reachable grapple, not an ordinary retreat."
-                    : "Fire a grappling hook toward the chosen direction. It needs a reachable surface and may fail or be on cooldown. If there is no surface to hook, I fall back to Medium. Use only when I need the hook to cross a large gap or escape a trap."
+                    ? "Up: grapple, jump or extra jump, then use Slimy Saddle while rising and dismount at the end of the rise. Down: mount Slimy Saddle and hold S; dismount when the action ends. Only choose this when the vertical movement needs the mount."
+                    : "Up: grapple, then jump or extra jump. Down: same as Small. Without Slimy Saddle, choose Medium for an upward grapple or Small for descent."
             })
         };
         string stateJson = JsonSerializer.Serialize(state);
@@ -130,14 +137,20 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
 
         JsonElement answers = body.RootElement.GetProperty("answers");
         string direction = ChoiceValue(answers, "direction");
-        string magnitude = ChoiceValue(answers, "size");
+        string horizontalSize = ChoiceValue(answers, "horizontal_size");
+        string verticalSize = ChoiceValue(answers, "vertical_size");
+        DodgeDirection chosenDirection = ParseDirection(direction);
+        (int x, int y) = Components(chosenDirection);
+        Magnitude chosenHorizontalSize = ParseMagnitude(horizontalSize);
+        Magnitude chosenVerticalSize = ParseMagnitude(verticalSize);
 
         var intent = new DodgeIntent(
-            ParseDirection(direction),
-            direction == "Stay" ? Magnitude.None : ParseMagnitude(magnitude), false);
+            chosenDirection,
+            x == 0 ? Magnitude.None : chosenHorizontalSize == Magnitude.None ? Magnitude.Small : chosenHorizontalSize,
+            y == 0 ? Magnitude.None : chosenVerticalSize == Magnitude.None ? Magnitude.Small : chosenVerticalSize, false);
 
         var probabilities = new Dictionary<string, IReadOnlyDictionary<string, float>>();
-        foreach (string name in new[] { "direction", "size" })
+        foreach (string name in new[] { "direction", "horizontal_size", "vertical_size" })
         {
             var values = new Dictionary<string, float>();
             foreach (JsonProperty value in answers.GetProperty(name).GetProperty("probabilities").EnumerateObject())
@@ -246,6 +259,7 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
 
     private static Magnitude ParseMagnitude(string value) => value switch
     {
+        "None" => Magnitude.None,
         "Small" => Magnitude.Small,
         "Medium" => Magnitude.Medium,
         "Large" => Magnitude.Large,

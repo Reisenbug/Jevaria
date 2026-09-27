@@ -8,11 +8,17 @@ public enum DodgeDirection { Up, UpRight, Right, DownRight, Down, DownLeft, Left
 public enum Magnitude { None, Small, Medium, Large }
 
 public readonly record struct DodgeIntent(
-    DodgeDirection Direction, Magnitude Size, bool Dash)
+    DodgeDirection Direction, Magnitude HorizontalSize, Magnitude VerticalSize, bool Dash)
 {
-    public static DodgeIntent Idle => new(DodgeDirection.Stay, Magnitude.None, false);
+    public static DodgeIntent Idle => new(DodgeDirection.Stay, Magnitude.None, Magnitude.None, false);
 
-    public bool Valid => (Direction == DodgeDirection.Stay) == (Size == Magnitude.None);
+    public bool Valid => Direction switch
+    {
+        DodgeDirection.Stay => HorizontalSize == Magnitude.None && VerticalSize == Magnitude.None,
+        DodgeDirection.Left or DodgeDirection.Right => HorizontalSize is Magnitude.Small or Magnitude.Medium && VerticalSize == Magnitude.None,
+        DodgeDirection.Up or DodgeDirection.Down => HorizontalSize == Magnitude.None && VerticalSize != Magnitude.None,
+        _ => HorizontalSize is Magnitude.Small or Magnitude.Medium && VerticalSize != Magnitude.None
+    };
 }
 
 public readonly record struct CombatEntity(
