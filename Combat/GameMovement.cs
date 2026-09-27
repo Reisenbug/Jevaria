@@ -17,6 +17,7 @@ public sealed class GameMovement : IMovementDriver
     private ulong _hookCooldownUntil;
     private Vector2 _hookTarget;
     private float _previousHookDistance = float.MaxValue;
+    private bool _hookPulled;
 
     public ActionResult Apply(Player player, DodgeIntent intent, CombatSnapshot snapshot)
     {
@@ -48,8 +49,10 @@ public sealed class GameMovement : IMovementDriver
         if (!moving) size = Magnitude.None;
         bool wantHook = moving && size == Magnitude.Large;
         float hookDistance = Vector2.Distance(player.Center, _hookTarget);
-        bool hookFinished = _autoHookActive && player.grapCount > 0 &&
-            hookDistance >= _previousHookDistance && Main.GameUpdateCount > _hookIssuedTick + 2;
+        if (_autoHookActive && player.grapCount > 0 && hookDistance < _previousHookDistance - 0.1f)
+            _hookPulled = true;
+        bool hookFinished = _autoHookActive && player.grapCount > 0 && _hookPulled &&
+            hookDistance >= _previousHookDistance - 0.1f;
         if (_autoHookActive && (!wantHook ||
             Main.GameUpdateCount - _hookIssuedTick >= 45 || hookFinished))
         {
@@ -70,6 +73,7 @@ public sealed class GameMovement : IMovementDriver
                 _hookIssuedTick = Main.GameUpdateCount;
                 _hookTarget = hook;
                 _previousHookDistance = float.MaxValue;
+                _hookPulled = false;
                 Main.mouseX = (int)(hook.X - Main.screenPosition.X);
                 Main.mouseY = (int)(hook.Y - Main.screenPosition.Y);
                 player.releaseHook = true;
@@ -85,6 +89,7 @@ public sealed class GameMovement : IMovementDriver
         }
         else if (_autoHookActive && player.grapCount == 0)
         {
+            reason = "grapple";
             _hookHeld = !_hookHeld;
             player.controlHook = _hookHeld;
             if (_hookHeld)
@@ -151,6 +156,7 @@ public sealed class GameMovement : IMovementDriver
         player.RemoveAllGrapplingHooks();
         _autoHookActive = false;
         _hookHeld = false;
+        _hookPulled = false;
         _hookCooldownUntil = Main.GameUpdateCount + 30;
     }
 
