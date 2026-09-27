@@ -267,7 +267,8 @@ public sealed class CombatPlayer : ModPlayer
         _activeSince = Stopwatch.GetTimestamp();
         Status = "acting";
         Mod.Logger.Info($"decision #{answer.Sequence}: {answer.Intent}; " +
-            $"latency={answer.LatencyMs}ms; previous_action={previousAgeMs}ms; probabilities={JsonSerializer.Serialize(answer.Probabilities)}");
+            $"confidence={answer.Confidence:0.000}; latency={answer.LatencyMs}ms; " +
+            $"previous_action={previousAgeMs}ms; probabilities={JsonSerializer.Serialize(answer.Probabilities)}");
         DodgeIntent shown = answer.Intent;
         string direction = shown.Direction switch
         {
@@ -285,7 +286,8 @@ public sealed class CombatPlayer : ModPlayer
             _snapshot.BossMotion.Any(motion => motion.Id == boss.Id && motion.MaxHealth > 0 &&
                 motion.Health * 100 <= motion.MaxHealth * 40));
         Main.NewText($"[Jev{(phaseTwo ? " P2" : "")} #{answer.Sequence}] {direction} H:{shown.HorizontalSize} V:{shown.VerticalSize}" +
-            (shown.Dash ? " dash" : "") + $" {answer.LatencyMs}ms",
+            (shown.Dash ? " dash" : "") +
+            $" | confidence {answer.Confidence * 100f:0}% | {answer.LatencyMs}ms",
             phaseTwo ? Color.MediumPurple : Color.Orange);
     }
 

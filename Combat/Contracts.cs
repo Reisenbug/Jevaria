@@ -54,7 +54,7 @@ public sealed record CombatSnapshot(
 
 public sealed record DodgeDecision(
     DodgeIntent Intent, IReadOnlyDictionary<string, IReadOnlyDictionary<string, float>> Probabilities,
-    long LatencyMs, ulong Sequence);
+    float Confidence, long LatencyMs, ulong Sequence);
 
 public readonly record struct ActionResult(DodgeIntent Requested, DodgeIntent Applied, string Reason);
 

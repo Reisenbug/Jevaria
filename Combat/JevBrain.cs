@@ -186,7 +186,9 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
         probabilities["horizontal"] = horizontalProbabilities;
         probabilities["vertical"] = verticalProbabilities;
         probabilities["tool"] = toolProbabilities;
-        return new DodgeDecision(chosen.Intent, probabilities, timer.ElapsedMilliseconds, snapshot.Sequence);
+        float confidence = answers.GetProperty("action").GetProperty("confidence").GetSingle();
+        return new DodgeDecision(chosen.Intent, probabilities, confidence,
+            timer.ElapsedMilliseconds, snapshot.Sequence);
     }
 
     private static void AddProbability(Dictionary<string, float> values, string key, float probability)
