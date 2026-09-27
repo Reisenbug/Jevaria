@@ -115,6 +115,14 @@ public sealed class CombatPlayer : ModPlayer
         bool bossPresent = _sensor.Observe(Player);
         if (bossPresent)
         {
+            if (Player.statLife < Player.statLifeMax2 * 0.5f || Player.lavaWet)
+            {
+                int potionDelay = Player.potionDelay;
+                int health = Player.statLife;
+                Player.QuickHeal();
+                if (Player.potionDelay > potionDelay || Player.statLife > health)
+                    Mod.Logger.Info($"quick heal: health={health}->{Player.statLife}; potion delay={Player.potionDelay}; tick={Main.GameUpdateCount}");
+            }
             int? slot = _attack.SelectFirstWeapon(Player);
             if (slot is { } selected)
                 Mod.Logger.Info($"weapon selected: slot={selected + 1}; item={Player.HeldItem.Name}");
