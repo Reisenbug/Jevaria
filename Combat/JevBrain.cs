@@ -136,17 +136,18 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
         {
             ["direction"] = Choice(twins
                 ? "Choose a broad escape corridor from boss bodies and projectile lanes, with room to keep moving afterward. Favor a substantial vertical sweep over tiny repeated reversals; do not thread narrow gaps or automatically return toward the ceiling. Route descriptions give rough separation trends and projectile exposure, not exact collision predictions. Burst amplifies existing upward speed with Slimy Saddle, while downward Burst mounts immediately. Use the stronger move to clear danger quickly. Spazmatism enters phase two at 40 percent health: keep trending beyond 35 cells away and rapidly increase separation when closer."
-                : "Choose the safest movement direction for the next reaction interval. Compare every boss body and projectile, their motion and damage, and room near solid and world boundaries. Frames until contact assumes current velocities remain constant. Preserve an escape route and vary height when a pursuer would catch sustained horizontal running. Follow the boss notes. All listed directions have at least one available action.",
+                : "Choose a broad route away from boss bodies and projectile lanes. Check each route's rough boss clearance trend and remaining room, including where I will be when this answer arrives. Do not move toward a nearby boss body or enter a wall or ceiling when another escape route exists. Preserve room to continue dodging after this interval. These projections are coarse and bosses may change speed.",
                 twins ? twinRoutes.ToDictionary(route => route.Key,
                     route => RouteDescription(route.Value.Direction, snapshot,
                         route.Value.VerticalSize == Magnitude.Large)) :
-                    directions.ToDictionary(group => group.Key.ToString(), group => DirectionDescription(group.Key)))
+                    directions.ToDictionary(group => group.Key.ToString(),
+                        group => RouteDescription(group.Key, snapshot, false)))
         };
         foreach (var (route, candidates) in twins ? new Dictionary<DodgeDirection, DodgeOption[]>() : directions)
         {
             if (candidates.Length == 1) continue;
             questions[$"tool_{route}"] = Choice(
-                $"Assume I move {route} for the next reaction interval. Which available movement tool is needed in that direction? Choose ordinary movement if it avoids the threat. A hook briefly latches, then jumps free after one or two frames. Slimy Saddle gives a strong vertical move but weak horizontal steering and can carry me into a boundary; use it only when ordinary movement or a hook cannot create enough safe separation.",
+                $"Assume I move {route} for the next reaction interval. Choose a movement tool that clears the boss body and projectile lanes with room to keep escaping. Use ordinary movement when its displacement is enough; use a stronger vertical move when a slow route would remain inside the danger area. A hook briefly latches, then jumps free after one or two frames. Slimy Saddle gives fast vertical travel but weak horizontal steering, so check ceiling and floor room.",
                 candidates.ToDictionary(option => ActionName(option.Intent), ActionDescription));
         }
         string stateJson = JsonSerializer.Serialize(state);
@@ -255,15 +256,19 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
 
     private static string RouteDescription(DodgeDirection direction, CombatSnapshot snapshot, bool burst)
     {
+        if (direction == DodgeDirection.Stay) return DirectionDescription(direction);
         (int x, int y) = Components(direction);
         float horizontal = x == 0 ? 0f : 12f * x;
+        float horizontalRoom = x < 0
+            ? Room(snapshot.SolidDistances.Left, snapshot.WorldDistances.Left) - GameMovement.HorizontalReserveCells
+            : Room(snapshot.SolidDistances.Right, snapshot.WorldDistances.Right) - GameMovement.HorizontalReserveCells;
         float verticalRoom = y < 0
             ? Room(snapshot.SolidDistances.Up, snapshot.WorldDistances.Up) - GameMovement.UpperReserveCells
             : Room(snapshot.SolidDistances.Down, snapshot.WorldDistances.Down) - GameMovement.LowerReserveCells;
         float travelEstimate = burst ? (y < 0 ? 18f : 22f) : (y < 0 ? 10f : 18f);
         float vertical = y * Math.Max(0f, Math.Min(travelEstimate, verticalRoom));
         Vector2 displacement = new(horizontal * 16f, vertical * 16f);
-        string bossClearance = string.Join("; ", snapshot.Bosses
+        string bossClearance = string.Join("; ", snapshot.Bosses.Concat(snapshot.Parts)
             .Where(boss => Vector2.Distance(boss.Center, snapshot.Player.Center) < 70f * 16f)
             .Select(boss =>
             {
@@ -286,13 +291,14 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
         return $"{DirectionDescription(direction)} Approximate displacement over 0.6 seconds: " +
             $"{horizontal:0} cells right, {vertical:0} cells down. " +
             (burst ? "Mount for faster vertical travel while holding W or S. " :
-                "Ordinary vertical travel. ") +
+                y == 0 ? "Ordinary horizontal travel. " : "Ordinary vertical travel. ") +
             $"Boss clearance trend: {(bossClearance.Length == 0 ? "no nearby boss" : bossClearance)}. " +
             $"Projectile corridor: {(exposed == 0 ? "clear" : exposed < 3 ? "exposed" : "crowded")}. " +
-            (snapshot.Leg.Sign != 0 && y != snapshot.Leg.Sign
+            (snapshot.Leg.Sign == 0 ? "" : y != snapshot.Leg.Sign
                 ? "This reverses the current vertical leg. "
                 : "This continues the current vertical leg. ") +
-            $"Available vertical room before reserve: {Math.Max(0f, verticalRoom):0} cells.";
+            $"Available room beyond reserve: horizontal {(x == 0 ? 0f : Math.Max(0f, horizontalRoom)):0}, " +
+            $"vertical {(y == 0 ? 0f : Math.Max(0f, verticalRoom)):0} cells.";
     }
 
     private static string ActionDescription(DodgeOption option)

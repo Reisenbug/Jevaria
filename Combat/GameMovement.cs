@@ -17,9 +17,11 @@ public sealed class GameMovement : IMovementDriver
         BoundaryDistances world, Vector2 velocity)
     {
         float horizontalReserve = Math.Max(HorizontalReserveCells * 16f,
-            Math.Abs(velocity.X) * 60f * 1.2f);
+            Math.Abs(velocity.X) * 60f * 1.2f) +
+            Math.Max(0f, horizontal * velocity.X) * 18f;
         float upperReserve = Math.Max(UpperReserveCells * 16f,
-            Math.Max(0f, -velocity.Y) * 60f * 0.6f);
+            Math.Max(0f, -velocity.Y) * 60f * 0.6f) +
+            5f * 16f + Math.Max(0f, -velocity.Y) * 18f;
         return horizontal < 0 && (solid.Left <= horizontalReserve ||
                 world.Left <= horizontalReserve + GameSensor.WorldEdgeCells * 16f) ||
             horizontal > 0 && (solid.Right <= horizontalReserve ||
