@@ -89,7 +89,7 @@ public sealed class GameSensor : ICombatSensor
         Rectangle box = player.Hitbox;
         var world = new BoundaryDistances(box.Left, Main.maxTilesX * 16f - box.Right,
             box.Top, Main.maxTilesY * 16f - box.Bottom);
-        bool hasMount = player.miscEquips[3].mountType >= MountID.Rudolph;
+        bool hasMount = player.miscEquips[3].type == ItemID.SlimySaddle;
         bool hasHook = player.miscEquips[4].shoot != ProjectileID.None && Main.projHook[player.miscEquips[4].shoot];
         for (int slot = 0; slot < 58 && !hasHook; slot++)
         {

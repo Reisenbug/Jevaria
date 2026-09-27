@@ -18,6 +18,11 @@ public sealed class GameMovement : IMovementDriver
     private Vector2 _hookTarget;
     private float _previousHookDistance = float.MaxValue;
     private bool _hookPulled;
+    private bool _autoMountActive;
+    private bool _autoMountForDown;
+    private bool _mountRiseSeen;
+    private ulong _mountStartTick;
+    private ulong _upMountSequence;
 
     public ActionResult Apply(Player player, DodgeIntent intent, CombatSnapshot snapshot)
     {
@@ -47,9 +52,18 @@ public sealed class GameMovement : IMovementDriver
             if (vertical > 0) { vertical = 0; reason = "lower boundary"; }
         }
 
+        bool slimeEquipped = player.miscEquips[3].type == ItemID.SlimySaddle;
+        bool upMount = slimeEquipped && intent.Direction == DodgeDirection.Up && vertical < 0 && size == Magnitude.Large;
+        bool downMount = slimeEquipped && intent.Direction == DodgeDirection.Down && vertical > 0 && size == Magnitude.Large;
+        if (_autoMountActive && downMount) _autoMountForDown = true;
+        if (_autoMountActive && ((!upMount && !downMount) || upMount && _autoMountForDown ||
+            !_autoMountForDown && (_mountRiseSeen && player.velocity.Y >= 0f ||
+            !_mountRiseSeen && Main.GameUpdateCount - _mountStartTick > 6)))
+            DismountAuto(player);
+
         bool moving = horizontal != 0 || vertical != 0;
         if (!moving) size = Magnitude.None;
-        bool wantHook = moving && size == Magnitude.Large;
+        bool wantHook = moving && size == Magnitude.Large && !downMount;
         float hookDistance = Vector2.Distance(player.Center, _hookTarget);
         if (_autoHookActive && player.grapCount > 0 && hookDistance < _previousHookDistance - 0.1f)
             _hookPulled = true;
@@ -115,11 +129,26 @@ public sealed class GameMovement : IMovementDriver
         }
         player.controlLeft = horizontal < 0;
         player.controlRight = horizontal > 0;
-        player.controlUp = player.grapCount == 0 && vertical == 0 && player.velocity.Y != 0f;
+        player.controlUp = player.grapCount == 0 &&
+            (vertical < 0 || vertical == 0 && player.velocity.Y != 0f);
         player.controlDown = player.grapCount == 0 && vertical > 0;
         bool useExtraJump = canJump && vertical < 0 && size == Magnitude.Medium &&
             snapshot.CanDoubleJump && _jumpSequence != snapshot.Sequence;
         player.controlJump = ApplyJump(player, canJump && vertical < 0, useExtraJump, snapshot.Sequence);
+        if (upMount && !_autoMountActive && _upMountSequence != snapshot.Sequence &&
+            player.controlJump && (player.velocity.Y <= 0f || hookFinished) &&
+            (!_autoHookActive && player.grapCount == 0 || hookFinished))
+        {
+            if (MountAuto(player, false))
+            {
+                _upMountSequence = snapshot.Sequence;
+                reason = "slime mount jump";
+            }
+        }
+        if (downMount && !_autoMountActive && MountAuto(player, true))
+            reason = "slime mount descent";
+        if (_autoMountActive && !_autoMountForDown && player.velocity.Y < -0.1f)
+            _mountRiseSeen = true;
         var applied = new DodgeIntent(Compose(horizontal, vertical), moving ? size : Magnitude.None, false);
         return new ActionResult(intent, applied, reason);
     }
@@ -154,12 +183,35 @@ public sealed class GameMovement : IMovementDriver
     {
         _jumpHeld = false;
         _jumpTicks = 0;
+        DismountAuto(player);
         if (!_autoHookActive) return;
         player.RemoveAllGrapplingHooks();
         _autoHookActive = false;
         _hookHeld = false;
         _hookPulled = false;
         _hookCooldownUntil = Main.GameUpdateCount + 30;
+    }
+
+    private bool MountAuto(Player player, bool down)
+    {
+        if (player.mount.Active || !player.mount.CanMount(MountID.Slime, player)) return false;
+        player.mount.SetMount(MountID.Slime, player);
+        if (!player.mount.Active || player.mount.Type != MountID.Slime) return false;
+        _autoMountActive = true;
+        _autoMountForDown = down;
+        _mountRiseSeen = false;
+        _mountStartTick = Main.GameUpdateCount;
+        return true;
+    }
+
+    private void DismountAuto(Player player)
+    {
+        if (!_autoMountActive) return;
+        if (player.mount.Active && player.mount.Type == MountID.Slime)
+            player.mount.Dismount(player);
+        _autoMountActive = false;
+        _autoMountForDown = false;
+        _mountRiseSeen = false;
     }
 
     private bool ApplyJump(Player player, bool rise, bool hop, ulong sequence)

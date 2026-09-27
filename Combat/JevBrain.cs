@@ -101,7 +101,9 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
             {
                 ["Small"] = "Run, jump, fly or fall in the chosen direction. No dash or grapple. I can change direction on the next answer. Use this when ordinary movement is enough, even for a long retreat.",
                 ["Medium"] = "Trigger an extra jump when moving up or up diagonally; diagonal jumps can also move me sideways. There is no dash. Sideways and downward Medium move exactly like Small, so choose Small for those directions. Use Medium only when an extra upward jump is needed to avoid an imminent hit.",
-                ["Large"] = "Fire a grappling hook toward the chosen direction. It needs a reachable surface and may fail or be on cooldown. If there is no surface to hook, I fall back to Medium. Use only when I need the hook to cross a large gap or escape a trap."
+                ["Large"] = snapshot.HasMount
+                    ? "With Slimy Saddle equipped: straight Up grapples if possible, then mounts while jumping and dismounts when the rise ends; straight Down mounts and holds down, then dismounts when the action ends. Sideways and diagonal Large only grapple. Use Large for an urgent vertical move or a reachable grapple, not an ordinary retreat."
+                    : "Fire a grappling hook toward the chosen direction. It needs a reachable surface and may fail or be on cooldown. If there is no surface to hook, I fall back to Medium. Use only when I need the hook to cross a large gap or escape a trap."
             })
         };
         string stateJson = JsonSerializer.Serialize(state);
