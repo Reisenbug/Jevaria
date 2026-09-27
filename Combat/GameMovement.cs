@@ -8,6 +8,27 @@ namespace Jevaria.Combat;
 
 public sealed class GameMovement : IMovementDriver
 {
+    public const int HorizontalReserveCells = 35;
+    public const int UpperReserveCells = 18;
+    public const int LowerReserveCells = 4;
+
+    public static bool Blocked(int horizontal, int vertical, BoundaryDistances solid,
+        BoundaryDistances world, Vector2 velocity)
+    {
+        float horizontalReserve = Math.Max(HorizontalReserveCells * 16f,
+            Math.Abs(velocity.X) * 60f * 1.2f);
+        float upperReserve = Math.Max(UpperReserveCells * 16f,
+            Math.Max(0f, -velocity.Y) * 60f * 0.6f);
+        return horizontal < 0 && (solid.Left <= horizontalReserve ||
+                world.Left <= horizontalReserve + GameSensor.WorldEdgeCells * 16f) ||
+            horizontal > 0 && (solid.Right <= horizontalReserve ||
+                world.Right <= horizontalReserve + GameSensor.WorldEdgeCells * 16f) ||
+            vertical < 0 && (solid.Up <= upperReserve ||
+                world.Up <= upperReserve + GameSensor.WorldEdgeCells * 16f) ||
+            vertical > 0 && (solid.Down <= LowerReserveCells * 16f ||
+                world.Down <= (LowerReserveCells + GameSensor.WorldEdgeCells) * 16f);
+    }
+
     public static IReadOnlyList<DodgeOption> AvailableActions(Player player,
         BoundaryDistances solid, BoundaryDistances world, bool hasHook, bool hasMount)
     {
@@ -23,16 +44,11 @@ public sealed class GameMovement : IMovementDriver
             (-1, Magnitude.Large), (1, Magnitude.Small), (1, Magnitude.Large)
         };
         var hookTargets = new Dictionary<(int X, int Y, bool NearHorizontal), float?>();
-        float worldReserve = (GameSensor.WorldEdgeCells + GameSensor.EscapeReserveCells) * 16f;
-        float solidReserve = GameSensor.EscapeReserveCells * 16f;
         foreach (var (x, horizontalSize) in horizontal)
         foreach (var (y, verticalSize) in vertical)
         {
             if (x == 0 && y == 0) continue;
-            if (x < 0 && (world.Left <= worldReserve || solid.Left <= solidReserve) ||
-                x > 0 && (world.Right <= worldReserve || solid.Right <= solidReserve) ||
-                y < 0 && (world.Up <= worldReserve || solid.Up <= solidReserve) ||
-                y > 0 && (world.Down <= worldReserve || solid.Down <= solidReserve)) continue;
+            if (Blocked(x, y, solid, world, player.velocity)) continue;
             bool horizontalHook = horizontalSize == Magnitude.Medium;
             bool verticalHook = y < 0 && verticalSize >= Magnitude.Medium;
             bool upMount = y < 0 && verticalSize == Magnitude.Large;
@@ -88,18 +104,16 @@ public sealed class GameMovement : IMovementDriver
         BoundaryDistances world = new(box.Left, Main.maxTilesX * 16f - box.Right,
             box.Top, Main.maxTilesY * 16f - box.Bottom);
 
-        float worldReserve = (GameSensor.WorldEdgeCells + GameSensor.EscapeReserveCells) * 16f;
-        float solidReserve = GameSensor.EscapeReserveCells * 16f;
-        if (world.Left <= worldReserve || solid.Left <= solidReserve)
+        if (Blocked(-1, 0, solid, world, player.velocity))
             if (horizontal < 0) { horizontal = 0; reason = "left blocked"; }
-        if (world.Right <= worldReserve || solid.Right <= solidReserve)
+        if (Blocked(1, 0, solid, world, player.velocity))
             if (horizontal > 0) { horizontal = 0; reason = "right blocked"; }
 
-        if (world.Up <= worldReserve || solid.Up <= solidReserve)
+        if (Blocked(0, -1, solid, world, player.velocity))
         {
             if (vertical < 0) { vertical = 0; reason = "upper boundary"; }
         }
-        if (world.Down <= worldReserve || solid.Down <= solidReserve)
+        if (Blocked(0, 1, solid, world, player.velocity))
         {
             if (vertical > 0) { vertical = 0; reason = "lower boundary"; }
         }
