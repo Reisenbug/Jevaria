@@ -149,7 +149,7 @@ public sealed class CombatPlayer : ModPlayer
             }
             _cancellation?.Dispose();
             _cancellation = new CancellationTokenSource();
-            Mod.Logger.Info($"state #{_snapshot.Sequence}: {JsonSerializer.Serialize(_snapshot, new JsonSerializerOptions { IncludeFields = true })}");
+            Mod.Logger.Info($"state #{_snapshot.Sequence}: tick={_snapshot.Tick}; player={_snapshot.Player.Center}; health={_snapshot.Health}/{_snapshot.MaxHealth}; bosses={_snapshot.Bosses.Count}; parts={_snapshot.Parts.Count}; projectiles={_snapshot.Projectiles.Count}");
             _request = Jevaria.Brain.DecideAsync(_snapshot, _cancellation.Token);
             Status = Decision == null ? "first decision pending" : "decision pending";
         }

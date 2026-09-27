@@ -67,13 +67,10 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
         if (string.IsNullOrWhiteSpace(key)) throw new InvalidOperationException("TYPESAFE_API_KEY is missing");
 
         JevariaConfig config = Terraria.ModLoader.ModContent.GetInstance<JevariaConfig>();
-        string instruction = config.GeneralInstruction;
-        foreach (CombatEntity boss in snapshot.Bosses)
-        {
-            if (boss.Name is not ("Spazmatism" or "Retinazer")) continue;
-            instruction += " " + config.Instruction;
-            break;
-        }
+        bool twins = snapshot.Bosses.Any(boss => boss.Name is "Spazmatism" or "Retinazer");
+        var bossNotes = twins
+            ? new Dictionary<string, string> { ["Spazmatism"] = config.Instruction }
+            : new Dictionary<string, string> { [snapshot.Boss.Name] = config.GeneralInstruction };
         var state = new
         {
             hp_percent = snapshot.Health * 100 / Math.Max(1, snapshot.MaxHealth),
@@ -104,7 +101,7 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
                 above = Room(snapshot.SolidDistances.Up, snapshot.WorldDistances.Up),
                 below = Room(snapshot.SolidDistances.Down, snapshot.WorldDistances.Down)
             },
-            boss_notes = instruction
+            boss_notes = bossNotes
         };
         var questions = new Dictionary<string, object>
         {
@@ -116,12 +113,15 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
                 ["Large"] = "Fire a grappling hook toward the chosen direction. It needs a reachable surface and may fail or be on cooldown. If there is no surface to hook, I fall back to Medium. Use only when I need the hook to cross a large gap or escape a trap."
             })
         };
+        string stateJson = JsonSerializer.Serialize(state);
+        Terraria.ModLoader.ModContent.GetInstance<Jevaria>().Logger.Info(
+            $"jev state #{snapshot.Sequence}: {stateJson}");
 
         using var request = new HttpRequestMessage(HttpMethod.Post, "https://api.typesafe.ai/v1/systemone");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);
         request.Content = new StringContent(JsonSerializer.Serialize(new
         {
-            model = "jev-latest", state = JsonSerializer.Serialize(state), questions
+            model = "jev-latest", state = stateJson, questions
         }, new JsonSerializerOptions
         {
             IncludeFields = true,
@@ -202,7 +202,7 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
     private static object BossThreat(CombatEntity entity, CombatSnapshot snapshot)
         => new
         {
-            id = entity.Id, name = entity.Name,
+            id = entity.Name, name = entity.Name,
             health_percent = snapshot.BossMotion.FirstOrDefault(motion => motion.Id == entity.Id) is { MaxHealth: > 0 } motion
                 ? motion.Health * 100 / motion.MaxHealth : 100,
             contact_damage_percent_of_my_hp = entity.Damage * 100 / Math.Max(1, snapshot.Health),
