@@ -13,6 +13,8 @@ public sealed class GameMovement : IMovementDriver
     private float _dropStartY;
     private int _dropTicks;
     private bool _autoHookActive;
+    private bool _jumpHeld;
+    private int _jumpTicks;
     private ulong _hookIssuedTick;
     private ulong _hookCooldownUntil;
     private Vector2 _hookTarget;
@@ -61,34 +63,27 @@ public sealed class GameMovement : IMovementDriver
         player.controlRight = horizontal == Direction.Positive;
         player.controlUp = vertical == Direction.Negative;
         player.controlDown = vertical == Direction.Positive;
-        player.controlJump = false;
-
-        if (vertical == Direction.Negative && !(_autoHookActive && player.grapCount > 0))
+        bool canJump = !(_autoHookActive && player.grapCount > 0);
+        if (vertical == Direction.Negative && canJump)
         {
-            player.controlJump = true;
             if (vMagnitude >= Magnitude.Medium && !snapshot.HasHook && !snapshot.CanFly)
             {
                 vMagnitude = Magnitude.Small;
                 reason = "no vertical ability";
             }
         }
-        else if (!(_autoHookActive && player.grapCount > 0) &&
-            horizontal != Direction.None && hMagnitude >= Magnitude.Medium)
+        bool useExtraJump = canJump && horizontal != Direction.None &&
+            hMagnitude == Magnitude.Medium && snapshot.CanDoubleJump &&
+            _jumpSequence != snapshot.Sequence;
+        if (horizontal != Direction.None && hMagnitude == Magnitude.Medium &&
+            !snapshot.CanDoubleJump)
         {
-            if (snapshot.CanDoubleJump)
-                player.controlJump = true;
-            else if (hMagnitude == Magnitude.Medium)
-            {
-                hMagnitude = Magnitude.Small;
-                reason = "extra jump unavailable";
-            }
+            hMagnitude = Magnitude.Small;
+            reason = "extra jump unavailable";
         }
-        if (horizontal != Direction.None && hMagnitude >= Magnitude.Medium &&
-            snapshot.CanDoubleJump && _jumpSequence != snapshot.Sequence)
-        {
-            _jumpSequence = snapshot.Sequence;
-            player.releaseJump = true;
-        }
+
+        player.controlJump = ApplyJump(player, canJump && vertical == Direction.Negative,
+            useExtraJump, snapshot.Sequence);
         if (vertical == Direction.Positive && vMagnitude == Magnitude.Small)
         {
             if (_dropSequence != snapshot.Sequence)
@@ -148,10 +143,36 @@ public sealed class GameMovement : IMovementDriver
 
     public void Release(Player player)
     {
+        _jumpHeld = false;
+        _jumpTicks = 0;
         if (!_autoHookActive) return;
         player.RemoveAllGrapplingHooks();
         _autoHookActive = false;
         _hookCooldownUntil = Main.GameUpdateCount + 30;
+    }
+
+    private bool ApplyJump(Player player, bool rise, bool hop, ulong sequence)
+    {
+        if (_jumpHeld)
+        {
+            if (hop)
+            {
+                _jumpHeld = false;
+                return false;
+            }
+            _jumpTicks++;
+            bool landed = player.velocity.Y == 0f && _jumpTicks > 2;
+            if (rise && !landed) return true;
+            if (player.velocity.Y < 0f && _jumpTicks < 30 && !landed) return true;
+            _jumpHeld = false;
+            return false;
+        }
+
+        if (!rise && !hop) return false;
+        if (hop) _jumpSequence = sequence;
+        _jumpHeld = true;
+        _jumpTicks = 0;
+        return true;
     }
 
     private static bool TryHookPoint(Player player, Direction horizontal,

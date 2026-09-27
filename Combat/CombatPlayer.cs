@@ -103,9 +103,8 @@ public sealed class CombatPlayer : ModPlayer
             return;
         }
 
-        bool manualInput = Player.controlLeft || Player.controlRight || Player.controlUp ||
-            Player.controlDown || Player.controlJump || Player.controlHook ||
-            Player.controlUseItem || Player.controlUseTile || Player.controlMount;
+        bool manualMovementInput = Player.controlLeft || Player.controlRight || Player.controlUp ||
+            Player.controlDown || Player.controlJump || Player.controlHook || Player.controlMount;
 
         bool bossPresent = _sensor.Observe(Player);
         if (bossPresent)
@@ -161,7 +160,7 @@ public sealed class CombatPlayer : ModPlayer
             return;
         }
 
-        if (DodgeEnabled && Decision != null && !manualInput)
+        if (DodgeEnabled && Decision != null && !manualMovementInput)
         {
             LastAction = _movement.Apply(Player, Decision!.Intent, _snapshot);
             if (LastAction.Reason != _lastActionReason)
@@ -193,7 +192,7 @@ public sealed class CombatPlayer : ModPlayer
             Center = boss.Center,
             Velocity = boss.velocity
         };
-        if (manualInput)
+        if (manualMovementInput)
         {
             AimTarget = null;
             return;
