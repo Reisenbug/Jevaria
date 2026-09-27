@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Xna.Framework;
@@ -20,6 +21,7 @@ public sealed class CombatPlayer : ModPlayer
     private ulong _sequence;
     private ulong _nextRequestTick;
     private long _activeSince;
+    private string _lastActionReason = "";
 
     public bool Enabled { get; private set; }
     public bool ShowHud { get; set; } = true;
@@ -48,6 +50,7 @@ public sealed class CombatPlayer : ModPlayer
         _snapshot = null;
         Decision = null;
         AimTarget = null;
+        _activeSince = 0;
         _movement.Release(Player);
     }
 
@@ -96,6 +99,12 @@ public sealed class CombatPlayer : ModPlayer
         }
 
         LastAction = _movement.Apply(Player, Decision.Intent, _snapshot);
+        if (LastAction.Reason != _lastActionReason)
+        {
+            _lastActionReason = LastAction.Reason;
+            if (_lastActionReason.Length > 0)
+                Mod.Logger.Info($"action #{Decision.Sequence}: {_lastActionReason}; applied={LastAction.Applied}");
+        }
         if (LastAction.Reason == "grapple") return;
 
         NPC boss = Main.npc[_snapshot.Boss.Id];
@@ -130,6 +139,7 @@ public sealed class CombatPlayer : ModPlayer
         if (completed.IsFaulted)
         {
             Status = completed.Exception?.GetBaseException().Message ?? "Jev request failed";
+            Mod.Logger.Warn($"Jev request failed: {Status}");
             Decision = null;
             _nextRequestTick = Main.GameUpdateCount + 60;
             return;
@@ -145,6 +155,8 @@ public sealed class CombatPlayer : ModPlayer
         Decision = answer;
         _activeSince = Stopwatch.GetTimestamp();
         Status = "acting";
+        Mod.Logger.Info($"decision #{answer.Sequence}: {answer.Intent}; " +
+            $"latency={answer.LatencyMs}ms; probabilities={JsonSerializer.Serialize(answer.Probabilities)}");
     }
 }
 
