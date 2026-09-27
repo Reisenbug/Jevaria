@@ -23,8 +23,9 @@ public sealed class JevariaConfig : ModConfig
         "and do not linger near solid or world boundaries. If solid_distances.up " +
         "is under 64 pixels, climbing has little room: descend when the route is safe " +
         "instead of repeatedly pushing into the ceiling. platform_distance_below " +
-        "is the distance to the nearest one-way platform; moving down can pass " +
-        "through it. Positions are pixels and " +
+        "at or below 8 pixels means a one-way platform is directly underfoot; moving " +
+        "down passes through it. Vary height in both directions when evading; do not " +
+        "treat vertical movement as only climbing. Positions are pixels and " +
         "velocities are pixels per game tick. Each action lasts until the next Jev answer, " +
         "usually about 300 ms. Choose direction and strength for each axis using the " +
         "available abilities. Request a dash only if available and useful now.";
@@ -38,7 +39,10 @@ public sealed class JevariaConfig : ModConfig
         "shots. Within 30 tiles (480 pixels) of Spazmatism is dangerous: its fire can reach " +
         "the player and there may be too little time to react to a charge. Stay farther away " +
         "when possible. Spazmatism keeps pursuing outside its charges, so keep changing height " +
-        "when there is room. A charge targets the player's position at its start; change " +
+        "by both climbing and descending when there is room; do not stay near the top of the arena or repeatedly " +
+        "choose up. When a platform is directly underfoot, a small down move drops below it; " +
+        "use this when the space below is safer, then climb again only when useful. " +
+        "A charge targets the player's position at its start; change " +
         "horizontal or vertical direction to make it miss, using both axes when needed. " +
         "At half health Spazmatism enters phase two, cycling between a sustained stream of " +
         "fire and six charges. Fire is continuous and repeated exposure hurts every tick; " +
@@ -113,11 +117,15 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
             {
                 up = snapshot.SolidDistances.Up < 24f
                     ? "Blocked by a solid ceiling; do not choose up"
-                    : "Move upward to avoid danger and keep room for the next action",
+                    : snapshot.SolidDistances.Up < 64f
+                        ? "Very little room above; choose up only to avoid an immediate threat there"
+                        : "Move upward to avoid danger and keep room for the next action",
                 none = "No vertical movement is useful now",
-                down = snapshot.SolidDistances.Up < 64f
-                    ? "Descend away from the ceiling if the path is safe; down passes through platforms"
-                    : "Move downward to avoid danger and keep room for the next action; down passes through platforms"
+                down = snapshot.PlatformDistanceBelow <= 8f
+                    ? "A one-way platform is directly underfoot; move down to drop below it if the space below is safe"
+                    : snapshot.SolidDistances.Up < 64f
+                        ? "Descend away from the ceiling if the path is safe; down passes through platforms"
+                        : "Move downward to avoid danger and keep room for the next action; down passes through platforms"
             }),
             ["horizontal_magnitude"] = Choice("If moving horizontally, how much movement is needed?", new
             {
