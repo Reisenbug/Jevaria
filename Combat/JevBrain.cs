@@ -26,35 +26,30 @@ public sealed class JevariaConfig : ModConfig
         "in tiles, speeds are in tiles per second, and actions last until the next answer.";
 
     public string Instruction =
-        "The Twins are two independently flying eyes. Focus damage " +
-        "on Spazmatism, the green fire eye, while it is alive. Dodge both surviving eyes. " +
-        "Avoid body contact first. " +
-        "In phase one Spazmatism retreats when approached and follows when the player retreats, " +
-        "so chasing it horizontally does not reliably control distance and can run into its " +
-        "shots. Within 30 tiles of Spazmatism is dangerous: its fire can reach " +
-        "the player and there may be too little time to react to a charge. Stay farther away " +
-        "when possible. Spazmatism keeps pursuing outside its charges, so keep changing height " +
-        "by both climbing and descending when there is room; do not stay near the top of the arena or repeatedly " +
-        "choose up. When a platform is directly underfoot, a small down move drops below it; " +
-        "use this when the space below is safer, then climb again only when useful. " +
-        "A charge targets the player's position at its start; change " +
-        "horizontal or vertical direction to make it miss, using both axes when needed. " +
-        "At half health Spazmatism enters phase two, cycling between a sustained stream of " +
-        "fire and six charges. Fire is continuous and repeated exposure hurts every tick; " +
-        "move out immediately when it starts hitting. Closer exposure is worse. Keep distance " +
-        "from phase-two Spazmatism even between fire attacks. Its charge contact is more " +
-        "dangerous than the fire. For a charge, change direction as it approaches, then use " +
-        "the slower interval to restore distance and attack. In the Spazmatism entry of `threats`, compare " +
-        "`boss_speed_cells_per_second` with `boss_fastest_in_the_last_second` for Spazmatism: " +
-        "a high current speed near its recent maximum can indicate a charge; a drop can " +
-        "indicate that charge has ended. Also consider the absolute speed, because a slow " +
-        "recent maximum alone is not a charge. Spazmatism's projectiles can add debuffs, so " +
-        "their cost exceeds their listed damage. Retinazer's main danger is collision, not " +
-        "its lasers; do not make a dangerous move just to avoid a weak laser. Both bodies " +
-        "can collide with the player. `threats` contains both surviving eyes. " +
-        "Avoid fleeing from one eye into the other; seek a direction clear " +
-        "of both. When caught between them, move away from Spazmatism first. The first test " +
-        "has wings, an extra jump, and a grapple, but no mount.";
+        "The Twins are two eyes flying separately; attack Spazmatism first. " +
+        "Avoiding contact comes first. " +
+        "Phase one movement: when I close in it backs off, when I back off it follows, " +
+        "so the horizontal distance cannot really be controlled; moving toward it only runs me head-on into its shots. " +
+        "Within 30 cells is dangerous: its flamethrower reaches there and its charges leave no time to react; stay farther, about 40 cells. " +
+        "In phase one Spazmatism chases me whenever it is not charging: never stop moving vertically. " +
+        "Dodging a charge needs a change of direction both horizontally and vertically; it locks onto where I was when the charge started. " +
+        "The Spazmatism health_percent in threats at or below 50 means phase two: it sheds its shell, then loops between breathing fire and charging six times in a row. " +
+        "The fire is a continuous stream, not separate shots; standing in it hurts every frame, " +
+        "so the moment the fire starts hitting me, leave; the closer I am, the worse it burns. " +
+        "In phase two, stay away from Spazmatism at all times, not only while it breathes fire. " +
+        "Those six charges hurt more than the fire, and each one will get close for an instant; " +
+        "dodge that by changing direction: it locks onto where I was when the charge started, so one step sideways or vertically makes it miss. " +
+        "How to tell it is charging: Spazmatism's speed_cells_per_second in threats close to " +
+        "its top_speed_in_the_last_second is the charge itself; " +
+        "when the speed drops, that round of charges is over, which is the window to open distance and deal damage. " +
+        "Spazmatism's shots carry a debuff, so one hit costs more than its damage number. " +
+        "Retinazer's danger is its ram, not its laser. It keeps its distance in both phases; " +
+        "its laser barely hurts in phase one and only a little more in phase two, not worth scrambling to dodge; " +
+        "but one ram is a big chunk of health. Treat both eyes as things that ram, " +
+        "and do not ignore Retinazer just because I am fighting Spazmatism. " +
+        "There are always two eyes on the field; count both when dodging. threats shows where the other one is. " +
+        "Running from one often runs straight into the other; the real dodge is toward the side where neither is. " +
+        "When caught between the two, get away from Spazmatism first.";
 }
 
 public sealed class JevBrain : IDodgeBrain, IDisposable
