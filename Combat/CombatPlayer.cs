@@ -178,7 +178,8 @@ public sealed class CombatPlayer : ModPlayer
 
         if (DodgeEnabled && Decision != null && !manualMovementInput)
         {
-            LastAction = _movement.Apply(Player, Decision!.Intent, _snapshot);
+            LastAction = _movement.Apply(Player, Decision!.Intent,
+                _snapshot with { Sequence = Decision.Sequence });
             if (LastAction.Reason != _lastActionReason)
             {
                 _lastActionReason = LastAction.Reason;

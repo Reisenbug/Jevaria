@@ -88,6 +88,12 @@ public sealed class GameSensor : ICombatSensor
         var world = new BoundaryDistances(box.Left, Main.maxTilesX * 16f - box.Right,
             box.Top, Main.maxTilesY * 16f - box.Bottom);
         bool hasMount = player.miscEquips[3].mountType >= MountID.Rudolph;
+        bool hasHook = player.miscEquips[4].shoot != ProjectileID.None && Main.projHook[player.miscEquips[4].shoot];
+        for (int slot = 0; slot < 58 && !hasHook; slot++)
+        {
+            int candidate = player.inventory[slot].shoot;
+            hasHook = candidate > 0 && Main.projHook[candidate];
+        }
         float shotSpeed = player.HeldItem.shootSpeed;
         int shotType = player.HeldItem.shoot;
         if (player.HeldItem.useAmmo != AmmoID.None &&
@@ -106,7 +112,7 @@ public sealed class GameSensor : ICombatSensor
             ScanSolids(box), world, ScanPlatformBelow(box),
             player.dashType > 0 && player.dashDelay == 0,
             player.AnyExtraJumpUsable(), player.wingTime > 0f,
-            player.miscEquips[4].shoot != ProjectileID.None, hasMount,
+            hasHook, hasMount,
             shotSpeed, shotType, player.HeldItem.Name, previous, previousDurationMs);
     }
 
