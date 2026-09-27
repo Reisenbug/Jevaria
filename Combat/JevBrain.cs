@@ -19,13 +19,13 @@ public sealed class JevariaConfig : ModConfig
 
     public string ApiKey = "";
 
-    public string GeneralInstruction =
+    public const string DefaultGeneralInstruction =
         "Fight the active boss. Avoid dangerous body contact and hostile projectiles, " +
         "considering every threat and incoming projectile. Keep an escape route and room " +
         "to dodge; do not linger near solid or world boundaries. Positions and room are " +
         "in tiles, speeds are in tiles per second, and actions last until the next answer.";
 
-    public string Instruction =
+    public const string DefaultInstruction =
         "The Twins are two eyes flying separately; attack Spazmatism first. " +
         "Avoiding contact comes first. " +
         "Phase one movement: when I close in it backs off, when I back off it follows, " +
@@ -50,6 +50,9 @@ public sealed class JevariaConfig : ModConfig
         "There are always two eyes on the field; count both when dodging. threats shows where the other one is. " +
         "Running from one often runs straight into the other; the real dodge is toward the side where neither is. " +
         "When caught between the two, get away from Spazmatism first.";
+
+    public string GeneralInstruction = DefaultGeneralInstruction;
+    public string Instruction = DefaultInstruction;
 }
 
 public sealed class JevBrain : IDodgeBrain, IDisposable
@@ -69,8 +72,10 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
         JevariaConfig config = Terraria.ModLoader.ModContent.GetInstance<JevariaConfig>();
         bool twins = snapshot.Bosses.Any(boss => boss.Name is "Spazmatism" or "Retinazer");
         var bossNotes = twins
-            ? new Dictionary<string, string> { ["Spazmatism"] = config.Instruction }
-            : new Dictionary<string, string> { [snapshot.Boss.Name] = config.GeneralInstruction };
+            ? new Dictionary<string, string> { ["Spazmatism"] = string.IsNullOrWhiteSpace(config.Instruction)
+                ? JevariaConfig.DefaultInstruction : config.Instruction }
+            : new Dictionary<string, string> { [snapshot.Boss.Name] = string.IsNullOrWhiteSpace(config.GeneralInstruction)
+                ? JevariaConfig.DefaultGeneralInstruction : config.GeneralInstruction };
         var state = new
         {
             hp_percent = snapshot.Health * 100 / Math.Max(1, snapshot.MaxHealth),
@@ -212,7 +217,7 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
             speed_upward = (int)(-entity.Velocity.Y * 60f / 16f),
             speed_cells_per_second = (int)((Math.Abs(entity.Velocity.X) + Math.Abs(entity.Velocity.Y)) * 60f / 16f),
             top_speed_in_the_last_second = (int)snapshot.BossMotion.FirstOrDefault(motion => motion.Id == entity.Id).BossFastestInTheLastSecond,
-            frames_until_it_hits_me = FramesUntilContact(entity, snapshot.Player) is var frames && frames >= 0 ? frames.ToString() : "not heading at me"
+            frames_until_it_hits_me = ContactTime(entity, snapshot.Player)
         };
 
     private static object ProjectileThreat(CombatEntity entity, CombatSnapshot snapshot) => new
@@ -223,8 +228,14 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
         cells_above_me = (int)((snapshot.Player.Center.Y - entity.Center.Y) / 16f),
         speed_to_the_right = (int)(entity.Velocity.X * 60f / 16f),
         speed_upward = (int)(-entity.Velocity.Y * 60f / 16f),
-        frames_until_it_hits_me = FramesUntilContact(entity, snapshot.Player) is var frames && frames >= 0 ? frames.ToString() : "not heading at me"
+        frames_until_it_hits_me = ContactTime(entity, snapshot.Player)
     };
+
+    private static object ContactTime(CombatEntity entity, CombatEntity player)
+    {
+        int frames = FramesUntilContact(entity, player);
+        return frames >= 0 ? frames : "not heading at me";
+    }
 
     private static int FramesUntilContact(CombatEntity entity, CombatEntity player)
     {
