@@ -46,6 +46,10 @@ public sealed class GameSensor : ICombatSensor
         var world = new BoundaryDistances(box.Left, Main.maxTilesX * 16f - box.Right,
             box.Top, Main.maxTilesY * 16f - box.Bottom);
         bool hasMount = player.miscEquips[3].mountType >= MountID.Rudolph;
+        float shotSpeed = player.HeldItem.shootSpeed;
+        if (player.HeldItem.useAmmo != AmmoID.None &&
+            !player.PickAmmo(player.HeldItem, out _, out shotSpeed, out _, out _, out _, true))
+            shotSpeed = 0f;
 
         return new CombatSnapshot(sequence, Main.GameUpdateCount,
             Entity(player.whoAmI, player.name, player.Center, player.velocity,
@@ -55,7 +59,7 @@ public sealed class GameSensor : ICombatSensor
             ScanSolids(box), world, player.dashType > 0 && player.dashDelay == 0,
             player.AnyExtraJumpUsable(), player.wingTime > 0f,
             player.miscEquips[4].shoot != ProjectileID.None, hasMount,
-            player.HeldItem.shootSpeed, player.HeldItem.Name, previous, previousDurationMs);
+            shotSpeed, player.HeldItem.Name, previous, previousDurationMs);
     }
 
     private static CombatEntity Entity(int id, string name, Vector2 center,
