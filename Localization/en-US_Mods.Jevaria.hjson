@@ -1,0 +1,10 @@
+Configs: {
+	JevariaConfig: {
+		Instruction: {
+			Tooltip: "Instruction sent with every boss combat state"
+			Label: Dodge instruction
+		}
+
+		DisplayName: Jevaria combat
+	}
+}

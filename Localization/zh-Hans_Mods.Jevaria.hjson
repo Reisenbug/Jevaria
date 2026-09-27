@@ -1,0 +1,10 @@
+Configs: {
+	JevariaConfig: {
+		Instruction: {
+			Tooltip: "每次 Boss 战决策都会发送的指令"
+			Label: 躲避指令
+		}
+
+		DisplayName: Jevaria 战斗
+	}
+}
