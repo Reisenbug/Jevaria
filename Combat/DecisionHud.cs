@@ -27,7 +27,8 @@ public sealed class DecisionHud : ModSystem
         if (!combat.ShowHud) return true;
 
         var text = new StringBuilder();
-        text.Append("Jevaria: ").Append(combat.Status);
+        text.Append("Jevaria: ").Append(combat.Status)
+            .Append("  dodge ").Append(combat.Enabled && combat.DodgeEnabled ? "on" : "off");
         if (combat.Decision is { } decision)
         {
             text.Append("  #").Append(decision.Sequence)
@@ -81,7 +82,7 @@ public sealed class DecisionHud : ModSystem
             Main.spriteBatch.Draw(pixel, new Rectangle((int)screen.X, (int)screen.Y - 7, 2, 15), Color.Lime);
         }
 
-        if (combat.Enabled && combat.Decision is { } active)
+        if (combat.Enabled && combat.DodgeEnabled && combat.Decision is { } active)
         {
             Vector2 player = Main.LocalPlayer.Center - Main.screenPosition;
             Vector2 direction = new((int)active.Intent.Horizontal, (int)active.Intent.Vertical);

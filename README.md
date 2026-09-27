@@ -7,7 +7,7 @@ Jev 驱动的 Terraria Boss 战实验模组。Jev 每次选择水平/垂直躲�
 1. 使用 tModLoader 2026.07 构建并启用 `Jevaria`。
 2. 在客户端模组配置中填入 TypeSafe API key，或在启动 tModLoader 的进程环境中设置 `TYPESAFE_API_KEY`。环境变量优先；模组配置保存在本机的 tModLoader `ModConfigs` 目录，不写入仓库。
 3. 进入单人世界，装备直线弹道的远程武器。双子魔眼出现后自动开始；若曾输入 `/jevaria off`，用 `/jevaria on` 重新待命。
-4. 输入 `/jevaria off` 停止自动操作；`/jevaria hud` 开关游戏内决策显示。
+4. 按 `P` 开关躲避移动；可在 tModLoader 键位设置中修改。关闭躲避后仍自动瞄准、攻击。输入 `/jevaria off` 停止全部自动操作；`/jevaria hud` 开关游戏内决策显示。
 
 Jev 的初始 instruction 可在 tModLoader 的 `JevariaConfig` 客户端配置中修改。它是待实战调整的草稿。第一轮目标为双子魔眼，移动装备为翅膀、二段跳和钩爪，暂不使用坐骑；武器为飞镖手枪，飞镖种类由当前弹药决定。
 

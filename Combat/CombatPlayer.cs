@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Xna.Framework;
 using Terraria;
+using Terraria.GameInput;
 using Terraria.ID;
 using Terraria.ModLoader;
 
@@ -24,6 +25,7 @@ public sealed class CombatPlayer : ModPlayer
     private string _lastActionReason = "";
 
     public bool Enabled { get; private set; } = true;
+    public bool DodgeEnabled { get; private set; } = true;
     public bool ShowHud { get; set; } = true;
     public string Status { get; private set; } = "waiting for boss";
     public DodgeDecision? Decision { get; private set; }
@@ -43,6 +45,7 @@ public sealed class CombatPlayer : ModPlayer
         }
 
         Enabled = enabled;
+        if (enabled) DodgeEnabled = true;
         Status = enabled ? "waiting for boss" : "off";
         Mod.Logger.Info($"combat {(enabled ? "enabled" : "disabled")}: tick={Main.GameUpdateCount}; health={Player.statLife}");
         if (enabled) return;
@@ -54,6 +57,28 @@ public sealed class CombatPlayer : ModPlayer
         _activeSince = 0;
         _movement.Release(Player);
         _attack.Release(Player);
+    }
+
+    public void SetDodgeEnabled(bool enabled)
+    {
+        DodgeEnabled = enabled;
+        _cancellation?.Cancel();
+        _request = null;
+        Decision = null;
+        _activeSince = 0;
+        _nextRequestTick = Main.GameUpdateCount;
+        _lastActionReason = "";
+        _movement.Release(Player);
+        Status = enabled ? "waiting for boss" : "dodge off";
+        Mod.Logger.Info($"dodge {(enabled ? "enabled" : "disabled")}: tick={Main.GameUpdateCount}");
+    }
+
+    public override void ProcessTriggers(TriggersSet triggersSet)
+    {
+        if (!Jevaria.DodgeToggle.JustPressed) return;
+        if (!Enabled) SetEnabled(true);
+        else SetDodgeEnabled(!DodgeEnabled);
+        Main.NewText($"[Jevaria] dodge {(Enabled && DodgeEnabled ? "on" : "off")}");
     }
 
     public override void SetControls()
@@ -79,9 +104,9 @@ public sealed class CombatPlayer : ModPlayer
 
         _sensor.Observe(Player);
 
-        if (_request?.IsCompleted == true) ReceiveDecision();
+        if (DodgeEnabled && _request?.IsCompleted == true) ReceiveDecision();
 
-        if (_request == null && Main.GameUpdateCount >= _nextRequestTick)
+        if (DodgeEnabled && _request == null && Main.GameUpdateCount >= _nextRequestTick)
         {
             _snapshot = _sensor.Capture(Player, ++_sequence,
                 Decision?.Intent ?? DodgeIntent.Idle, ActionAgeMs);
@@ -102,32 +127,44 @@ public sealed class CombatPlayer : ModPlayer
             Status = Decision == null ? "first decision pending" : "decision pending";
         }
 
-        if (_request != null && _request.IsCompleted == false &&
+        if (DodgeEnabled && _request != null && _request.IsCompleted == false &&
             _activeSince != 0 && ActionAgeMs > 1500)
         {
             Decision = null;
             Status = "stale action released";
         }
 
-        if (Decision == null || _snapshot == null)
+        if (!DodgeEnabled && Main.GameUpdateCount >= _nextRequestTick)
+        {
+            _snapshot = _sensor.Capture(Player, ++_sequence, DodgeIntent.Idle, 0);
+            _nextRequestTick = Main.GameUpdateCount + 15;
+            Status = _snapshot == null ? "waiting for boss" : "dodge off";
+        }
+
+        if (_snapshot == null || (DodgeEnabled && Decision == null))
         {
             _movement.Release(Player);
             _attack.Release(Player);
+            AimTarget = null;
             return;
         }
 
-        LastAction = _movement.Apply(Player, Decision.Intent, _snapshot);
-        if (LastAction.Reason != _lastActionReason)
+        if (DodgeEnabled)
         {
-            _lastActionReason = LastAction.Reason;
-            if (_lastActionReason.Length > 0)
-                Mod.Logger.Info($"action #{Decision.Sequence}: {_lastActionReason}; applied={LastAction.Applied}");
+            LastAction = _movement.Apply(Player, Decision!.Intent, _snapshot);
+            if (LastAction.Reason != _lastActionReason)
+            {
+                _lastActionReason = LastAction.Reason;
+                if (_lastActionReason.Length > 0)
+                    Mod.Logger.Info($"action #{Decision.Sequence}: {_lastActionReason}; applied={LastAction.Applied}");
+            }
+            if (LastAction.Reason == "grapple")
+            {
+                _attack.Release(Player);
+                return;
+            }
         }
-        if (LastAction.Reason == "grapple")
-        {
-            _attack.Release(Player);
-            return;
-        }
+        else _movement.Release(Player);
 
         NPC boss = Main.npc[_snapshot.Boss.Id];
         if (!boss.active || !boss.boss)
