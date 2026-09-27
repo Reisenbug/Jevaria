@@ -27,7 +27,8 @@ public readonly record struct BossMotion(
     int Health, int MaxHealth);
 
 public sealed record CombatSnapshot(
-    ulong Sequence, ulong Tick, CombatEntity Player, int Health,
+    ulong Sequence, ulong Tick, CombatEntity Player, int Health, int MaxHealth,
+    bool LosingHealthOverTime,
     CombatEntity Boss, IReadOnlyList<CombatEntity> Bosses,
     IReadOnlyList<BossMotion> BossMotion,
     IReadOnlyList<CombatEntity> Parts,

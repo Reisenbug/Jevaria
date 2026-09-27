@@ -21,18 +21,9 @@ public sealed class JevariaConfig : ModConfig
 
     public string GeneralInstruction =
         "Fight the active boss. Avoid dangerous body contact and hostile projectiles, " +
-        "considering every boss in `bosses` and the linked `parts`. Keep room to dodge " +
-        "and do not linger near solid or world boundaries. If solid_distances.up " +
-        "is under 64 pixels, climbing has little room: descend when the route is safe " +
-        "instead of repeatedly pushing into the ceiling. platform_distance_below " +
-        "at or below 8 pixels means a one-way platform is directly underfoot; moving " +
-        "down passes through it. Vary height in both directions when evading; do not " +
-        "treat vertical movement as only climbing. Positions are pixels and " +
-        "velocities are pixels per game tick. `frames_until_player_contact` estimates " +
-        "time to collision if current velocities continue; -1 means no predicted collision. " +
-        "Incoming projectiles are ordered by predicted contact time. Each action lasts until the next Jev answer, " +
-        "usually about 300 ms. Choose one joint direction for the whole route, then " +
-        "choose one movement size for that route. Request a dash only if available and useful now.";
+        "considering every threat and incoming projectile. Keep an escape route and room " +
+        "to dodge; do not linger near solid or world boundaries. Positions and room are " +
+        "in tiles, speeds are in tiles per second, and actions last until the next answer.";
 
     public string Instruction =
         "The Twins are two independently flying eyes. Focus damage " +
@@ -40,7 +31,7 @@ public sealed class JevariaConfig : ModConfig
         "Avoid body contact first. " +
         "In phase one Spazmatism retreats when approached and follows when the player retreats, " +
         "so chasing it horizontally does not reliably control distance and can run into its " +
-        "shots. Within 30 tiles (480 pixels) of Spazmatism is dangerous: its fire can reach " +
+        "shots. Within 30 tiles of Spazmatism is dangerous: its fire can reach " +
         "the player and there may be too little time to react to a charge. Stay farther away " +
         "when possible. Spazmatism keeps pursuing outside its charges, so keep changing height " +
         "by both climbing and descending when there is room; do not stay near the top of the arena or repeatedly " +
@@ -53,15 +44,15 @@ public sealed class JevariaConfig : ModConfig
         "move out immediately when it starts hitting. Closer exposure is worse. Keep distance " +
         "from phase-two Spazmatism even between fire attacks. Its charge contact is more " +
         "dangerous than the fire. For a charge, change direction as it approaches, then use " +
-        "the slower interval to restore distance and attack. In `boss_motion`, compare " +
+        "the slower interval to restore distance and attack. In the Spazmatism entry of `threats`, compare " +
         "`boss_speed_cells_per_second` with `boss_fastest_in_the_last_second` for Spazmatism: " +
         "a high current speed near its recent maximum can indicate a charge; a drop can " +
         "indicate that charge has ended. Also consider the absolute speed, because a slow " +
         "recent maximum alone is not a charge. Spazmatism's projectiles can add debuffs, so " +
         "their cost exceeds their listed damage. Retinazer's main danger is collision, not " +
         "its lasers; do not make a dangerous move just to avoid a weak laser. Both bodies " +
-        "can collide with the player. `bosses` contains the surviving eyes, while `boss` is " +
-        "the attack target. Avoid fleeing from one eye into the other; seek a direction clear " +
+        "can collide with the player. `threats` contains both surviving eyes. " +
+        "Avoid fleeing from one eye into the other; seek a direction clear " +
         "of both. When caught between them, move away from Spazmatism first. The first test " +
         "has wings, an extra jump, and a grapple, but no mount.";
 }
@@ -90,57 +81,46 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
         }
         var state = new
         {
-            instruction,
-            player = snapshot.Player,
-            health = snapshot.Health,
-            boss = Threat(snapshot.Boss, snapshot),
-            bosses = snapshot.Bosses.Select(boss => Threat(boss, snapshot)).ToArray(),
-            boss_motion = snapshot.BossMotion,
-            parts = snapshot.Parts.Select(part => Threat(part, snapshot)).ToArray(),
-            projectiles = snapshot.Projectiles
-                .Select(projectile => (Entity: projectile, Frames: FramesUntilContact(projectile, snapshot.Player)))
-                .Where(item => item.Frames >= 0 ||
-                    Vector2.DistanceSquared(item.Entity.Center, snapshot.Player.Center) <= 96f * 96f)
+            hp_percent = snapshot.Health * 100 / Math.Max(1, snapshot.MaxHealth),
+            i_am_losing_health_over_time = snapshot.LosingHealthOverTime,
+            my_speed_to_the_right = (int)(snapshot.Player.Velocity.X * 60f / 16f),
+            my_speed_upward = (int)(-snapshot.Player.Velocity.Y * 60f / 16f),
+            threats = snapshot.Bosses.Concat(snapshot.Parts)
+                .GroupBy(entity => entity.Name)
+                .Select(group => group.OrderBy(entity => Vector2.DistanceSquared(entity.Center, snapshot.Player.Center)).First())
+                .Where(entity => Vector2.Distance(entity.Center, snapshot.Player.Center) <= 200f * 16f)
+                .Select(entity => BossThreat(entity, snapshot)).ToArray(),
+            incoming_projectiles = snapshot.Projectiles
+                .Select(entity => (Entity: entity, Frames: FramesUntilContact(entity, snapshot.Player)))
+                .Where(item => item.Frames >= 0 || Vector2.DistanceSquared(item.Entity.Center, snapshot.Player.Center) <= 96f * 96f)
                 .OrderBy(item => item.Frames < 0 ? int.MaxValue : item.Frames)
                 .Take(12)
-                .Select(item => Threat(item.Entity, snapshot)).ToArray(),
-            solid_distances = snapshot.SolidDistances,
-            world_distances = snapshot.WorldDistances,
-            platform_distance_below = snapshot.PlatformDistanceBelow,
-            abilities = new
+                .Select(item => ProjectileThreat(item.Entity, snapshot)).ToArray(),
+            room = new
             {
-                snapshot.CanDash, snapshot.CanDoubleJump, snapshot.CanFly,
-                snapshot.HasHook, snapshot.HasMount
+                left = Room(snapshot.SolidDistances.Left, snapshot.WorldDistances.Left),
+                right = Room(snapshot.SolidDistances.Right, snapshot.WorldDistances.Right),
+                above = Room(snapshot.SolidDistances.Up, snapshot.WorldDistances.Up),
+                below = Room(snapshot.SolidDistances.Down, snapshot.WorldDistances.Down)
             },
-            previous = snapshot.PreviousIntent,
-            previous_duration_ms = snapshot.PreviousDurationMs
+            boss_notes = instruction
         };
         var questions = new Dictionary<string, object>
         {
-            ["direction"] = Choice("Choose one direction for the complete dodge route. Consider every boss, projectile, and escape route. If near a ceiling, a safe descent restores room to dodge the next attack; moving sideways alone does not.", DirectionCriteria(snapshot)),
-            ["magnitude"] = Choice("Which movement tool is needed for the current threat? Movement continues until the next answer, so a long retreat does not require a larger size.", new Dictionary<string, string>
+            ["direction"] = Choice("Terraria boss fight. Which way should I move right now so that nothing hits me? Look at every boss part and shot, where each is heading and how soon it reaches me, and how much room I have. Frames until contact assumes our current velocities stay constant; use enemy health to identify its phase. Keep an escape route: do not run into a wall, floor or ceiling, or toward another threat. Follow the boss notes.", DirectionCriteria(snapshot)),
+            ["size"] = Choice("Same moment. Choose the movement tool needed for the direction you chose. These choices do not limit travel distance; movement continues until the next answer.", new Dictionary<string, string>
             {
-                ["small"] = "Ordinary movement, wings, or a short platform drop is enough, even for a long retreat",
-                ["medium"] = "An extra jump is needed now for an upward dodge, or continuous down input is needed to descend across several platforms; sideways movement gains no extra speed",
-                ["large"] = "An imminent hit requires a grappling hook, and a solid anchor is reachable in the movement direction; otherwise it will fail"
-            }),
-            ["dash"] = new
-            {
-                type = "noul",
-                instructions = "Should the player dash horizontally on this action to dodge a threat?",
-                criteria = new
-                {
-                    @true = "A dash is available, useful now, and safer than normal movement",
-                    @false = "A dash is unavailable, unnecessary, or unsafe"
-                }
-            }
+                ["Small"] = "Run, jump, fly or fall in the chosen direction. No dash or grapple. I can change direction on the next answer. Use this when ordinary movement is enough, even for a long retreat.",
+                ["Medium"] = "Trigger an extra jump when moving up or up diagonally; diagonal jumps can also move me sideways. There is no dash. Sideways and downward Medium move exactly like Small, so choose Small for those directions. Use Medium only when an extra upward jump is needed to avoid an imminent hit.",
+                ["Large"] = "Fire a grappling hook toward the chosen direction. It needs a reachable surface and may fail or be on cooldown. If there is no surface to hook, I fall back to Medium. Use only when I need the hook to cross a large gap or escape a trap."
+            })
         };
 
         using var request = new HttpRequestMessage(HttpMethod.Post, "https://api.typesafe.ai/v1/systemone");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);
         request.Content = new StringContent(JsonSerializer.Serialize(new
         {
-            model = "jev-latest", state, questions
+            model = "jev-latest", state = JsonSerializer.Serialize(state), questions
         }, new JsonSerializerOptions
         {
             IncludeFields = true,
@@ -156,26 +136,20 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
 
         JsonElement answers = body.RootElement.GetProperty("answers");
         string direction = ChoiceValue(answers, "direction");
-        string magnitude = ChoiceValue(answers, "magnitude");
-        bool dash = answers.GetProperty("dash").GetProperty("noul").GetSingle() >= 0.5f;
+        string magnitude = ChoiceValue(answers, "size");
 
         var intent = new DodgeIntent(
             ParseDirection(direction),
-            direction == "stay" ? Magnitude.None : ParseMagnitude(magnitude), dash);
+            direction == "Stay" ? Magnitude.None : ParseMagnitude(magnitude), false);
 
         var probabilities = new Dictionary<string, IReadOnlyDictionary<string, float>>();
-        foreach (string name in new[] { "direction", "magnitude" })
+        foreach (string name in new[] { "direction", "size" })
         {
             var values = new Dictionary<string, float>();
             foreach (JsonProperty value in answers.GetProperty(name).GetProperty("probabilities").EnumerateObject())
                 values[value.Name] = value.Value.GetSingle();
             probabilities[name] = values;
         }
-        probabilities["dash"] = new Dictionary<string, float>
-        {
-            ["yes"] = answers.GetProperty("dash").GetProperty("noul").GetSingle(),
-            ["no"] = 1f - answers.GetProperty("dash").GetProperty("noul").GetSingle()
-        };
         return new DodgeDecision(intent, probabilities, timer.ElapsedMilliseconds, snapshot.Sequence);
     }
 
@@ -184,64 +158,72 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
 
     private static Dictionary<string, string> DirectionCriteria(CombatSnapshot snapshot)
     {
-        bool left = snapshot.WorldDistances.Left < 80f || snapshot.SolidDistances.Left < 32f;
-        bool right = snapshot.WorldDistances.Right < 80f || snapshot.SolidDistances.Right < 32f;
-        bool up = snapshot.WorldDistances.Up < 64f || snapshot.SolidDistances.Up < 24f;
-        bool down = snapshot.WorldDistances.Down < 64f || snapshot.SolidDistances.Down < 24f;
-        bool nearCeiling = snapshot.SolidDistances.Up < 320f;
-        string upText = up ? "up is blocked by a ceiling or world edge" :
-            nearCeiling ? $"only {snapshot.SolidDistances.Up:0} pixels remain before a solid ceiling" : "upward movement is available";
-        string downText = down ? "down is blocked by solid ground or the world edge" :
-            snapshot.PlatformDistanceBelow <= 8f ? "down passes through the platform directly underfoot" :
-            nearCeiling ? "down passes through platforms and restores vertical escape room" : "down passes through one-way platforms";
-        string leftText = left ? "left is blocked by a wall or world edge" :
-            nearCeiling ? "left is open but does not restore vertical escape room" : "leftward movement is available";
-        string rightText = right ? "right is blocked by a wall or world edge" :
-            nearCeiling ? "right is open but does not restore vertical escape room" : "rightward movement is available";
-        return new Dictionary<string, string>
+        bool left = Room(snapshot.SolidDistances.Left, snapshot.WorldDistances.Left) == 0;
+        bool right = Room(snapshot.SolidDistances.Right, snapshot.WorldDistances.Right) == 0;
+        bool up = Room(snapshot.SolidDistances.Up, snapshot.WorldDistances.Up) == 0;
+        bool down = Room(snapshot.SolidDistances.Down, snapshot.WorldDistances.Down) == 0;
+        var choices = new Dictionary<string, string>();
+        foreach (DodgeDirection direction in Enum.GetValues<DodgeDirection>())
         {
-            ["up"] = $"Move up to avoid threats; {upText}.",
-            ["up_right"] = $"Move up and right to avoid threats; {upText}, and {rightText}.",
-            ["right"] = $"Move right to avoid threats; {rightText}.",
-            ["down_right"] = $"Move down and right to avoid threats; {downText}, and {rightText}.",
-            ["down"] = $"Move down to avoid threats; {downText}.",
-            ["down_left"] = $"Move down and left to avoid threats; {downText}, and {leftText}.",
-            ["left"] = $"Move left to avoid threats; {leftText}.",
-            ["up_left"] = $"Move up and left to avoid threats; {upText}, and {leftText}.",
-            ["stay"] = "Stay where you are only if moving in every direction is more dangerous."
-        };
+            if (direction == DodgeDirection.Stay) { choices["Stay"] = "Stay where I am."; continue; }
+            (int x, int y) = Components(direction);
+            string horizontal = x < 0 ? "left" : "right";
+            string vertical = y < 0 ? "up" : "down";
+            string move = x == 0 ? $"Move straight {vertical}." : y == 0 ?
+                $"Move straight {horizontal}." : $"Move {vertical} and to the {horizontal}.";
+            bool xStop = x < 0 ? left : x > 0 && right;
+            bool yStop = y < 0 ? up : y > 0 && down;
+            string note = (x == 0 || xStop) && (y == 0 || yStop)
+                ? $" Blocked: {(y < 0 ? "a ceiling" : y > 0 ? "the floor" : "a wall")}{(x != 0 && y != 0 ? " and a wall are" : " is")} right there, so moving this way does nothing."
+                : xStop ? $" The {horizontal} part is blocked by a wall; I would only move {vertical}."
+                : yStop ? $" The {vertical} part is blocked by {(y < 0 ? "a ceiling" : "the floor")}; I would only move {horizontal}."
+                : "";
+            choices[direction.ToString()] = move + note;
+        }
+        return choices;
     }
 
-    private static DodgeDirection ParseDirection(string value) => value switch
+    private static (int X, int Y) Components(DodgeDirection direction) => direction switch
     {
-        "up" => DodgeDirection.Up,
-        "up_right" => DodgeDirection.UpRight,
-        "right" => DodgeDirection.Right,
-        "down_right" => DodgeDirection.DownRight,
-        "down" => DodgeDirection.Down,
-        "down_left" => DodgeDirection.DownLeft,
-        "left" => DodgeDirection.Left,
-        "up_left" => DodgeDirection.UpLeft,
-        "stay" => DodgeDirection.Stay,
-        _ => throw new FormatException("direction")
+        DodgeDirection.Up => (0, -1), DodgeDirection.UpRight => (1, -1),
+        DodgeDirection.Right => (1, 0), DodgeDirection.DownRight => (1, 1),
+        DodgeDirection.Down => (0, 1), DodgeDirection.DownLeft => (-1, 1),
+        DodgeDirection.Left => (-1, 0), DodgeDirection.UpLeft => (-1, -1),
+        _ => (0, 0)
     };
 
-    private static object Threat(CombatEntity entity, CombatSnapshot snapshot)
+    private static DodgeDirection ParseDirection(string value)
+        => Enum.TryParse(value, out DodgeDirection direction) ? direction : DodgeDirection.Stay;
+
+    private static int Room(float solid, float world)
+        => (int)Math.Clamp(Math.Min(solid, world - 40f * 16f) / 16f, 0f, 60f);
+
+    private static object BossThreat(CombatEntity entity, CombatSnapshot snapshot)
         => new
         {
-            entity.Id,
-            entity.Name,
-            entity.Center,
-            entity.Velocity,
-            entity.Size,
-            entity.Damage,
-            cells_right_of_player = (entity.Center.X - snapshot.Player.Center.X) / 16f,
-            cells_above_player = (snapshot.Player.Center.Y - entity.Center.Y) / 16f,
-            speed_to_the_right_cells_per_second = entity.Velocity.X * 60f / 16f,
-            speed_upward_cells_per_second = -entity.Velocity.Y * 60f / 16f,
-            damage_percent_of_current_health = entity.Damage * 100f / Math.Max(1, snapshot.Health),
-            frames_until_player_contact = FramesUntilContact(entity, snapshot.Player)
+            id = entity.Id, name = entity.Name,
+            health_percent = snapshot.BossMotion.FirstOrDefault(motion => motion.Id == entity.Id) is { MaxHealth: > 0 } motion
+                ? motion.Health * 100 / motion.MaxHealth : 100,
+            contact_damage_percent_of_my_hp = entity.Damage * 100 / Math.Max(1, snapshot.Health),
+            cells_to_my_right = (int)((entity.Center.X - snapshot.Player.Center.X) / 16f),
+            cells_above_me = (int)((snapshot.Player.Center.Y - entity.Center.Y) / 16f),
+            speed_to_the_right = (int)(entity.Velocity.X * 60f / 16f),
+            speed_upward = (int)(-entity.Velocity.Y * 60f / 16f),
+            speed_cells_per_second = (int)((Math.Abs(entity.Velocity.X) + Math.Abs(entity.Velocity.Y)) * 60f / 16f),
+            top_speed_in_the_last_second = (int)snapshot.BossMotion.FirstOrDefault(motion => motion.Id == entity.Id).BossFastestInTheLastSecond,
+            frames_until_it_hits_me = FramesUntilContact(entity, snapshot.Player) is var frames && frames >= 0 ? frames.ToString() : "not heading at me"
         };
+
+    private static object ProjectileThreat(CombatEntity entity, CombatSnapshot snapshot) => new
+    {
+        name = entity.Name,
+        damage_percent_of_my_hp = entity.Damage * 100 / Math.Max(1, snapshot.Health),
+        cells_to_my_right = (int)((entity.Center.X - snapshot.Player.Center.X) / 16f),
+        cells_above_me = (int)((snapshot.Player.Center.Y - entity.Center.Y) / 16f),
+        speed_to_the_right = (int)(entity.Velocity.X * 60f / 16f),
+        speed_upward = (int)(-entity.Velocity.Y * 60f / 16f),
+        frames_until_it_hits_me = FramesUntilContact(entity, snapshot.Player) is var frames && frames >= 0 ? frames.ToString() : "not heading at me"
+    };
 
     private static int FramesUntilContact(CombatEntity entity, CombatEntity player)
     {
@@ -268,9 +250,9 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
 
     private static Magnitude ParseMagnitude(string value) => value switch
     {
-        "small" => Magnitude.Small,
-        "medium" => Magnitude.Medium,
-        "large" => Magnitude.Large,
+        "Small" => Magnitude.Small,
+        "Medium" => Magnitude.Medium,
+        "Large" => Magnitude.Large,
         _ => throw new FormatException("magnitude")
     };
 

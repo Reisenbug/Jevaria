@@ -20,7 +20,7 @@ public sealed class GameSensor : ICombatSensor
             bossPresent = true;
             if (!_speedHistory.TryGetValue(npc.whoAmI, out var history))
                 _speedHistory[npc.whoAmI] = history = new Queue<(ulong, float)>();
-            history.Enqueue((now, npc.velocity.Length() * 60f / 16f));
+            history.Enqueue((now, (Math.Abs(npc.velocity.X) + Math.Abs(npc.velocity.Y)) * 60f / 16f));
             while (history.Count > 0 && now - history.Peek().Tick > 60)
                 history.Dequeue();
         }
@@ -53,7 +53,7 @@ public sealed class GameSensor : ICombatSensor
             bossIds.Add(npc.whoAmI);
             bosses.Add(Entity(npc.whoAmI, BossName(npc), npc.Center, npc.velocity,
                 npc.width, npc.height, npc.damage));
-            float speed = npc.velocity.Length() * 60f / 16f;
+            float speed = (Math.Abs(npc.velocity.X) + Math.Abs(npc.velocity.Y)) * 60f / 16f;
             float fastest = speed;
             if (_speedHistory.TryGetValue(npc.whoAmI, out var history))
                 foreach (var sample in history) fastest = Math.Max(fastest, sample.Speed);
@@ -94,6 +94,7 @@ public sealed class GameSensor : ICombatSensor
         return new CombatSnapshot(sequence, Main.GameUpdateCount,
             Entity(player.whoAmI, player.name, player.Center, player.velocity,
                 player.width, player.height, 0), player.statLife,
+            player.statLifeMax2, player.lifeRegen < 0,
             Entity(boss.whoAmI, BossName(boss), boss.Center, boss.velocity,
                 boss.width, boss.height, boss.damage), bosses, motion, parts, projectiles,
             ScanSolids(box), world, ScanPlatformBelow(box),
