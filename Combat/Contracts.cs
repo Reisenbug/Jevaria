@@ -32,6 +32,8 @@ public readonly record struct BossMotion(
     int Id, float BossSpeedCellsPerSecond, float BossFastestInTheLastSecond,
     int Health, int MaxHealth);
 
+public readonly record struct DodgeOption(DodgeIntent Intent, float? HookDistanceCells);
+
 public sealed record CombatSnapshot(
     ulong Sequence, ulong Tick, CombatEntity Player, int Health, int MaxHealth,
     bool LosingHealthOverTime,
@@ -43,6 +45,7 @@ public sealed record CombatSnapshot(
     float PlatformDistanceBelow,
     bool CanDash, bool CanDoubleJump, bool CanFly, bool HasHook,
     bool HasMount, float ShotSpeed, int ShotProjectileType, string WeaponName,
+    IReadOnlyList<DodgeOption> AvailableActions,
     DodgeIntent PreviousIntent, long PreviousDurationMs);
 
 public sealed record DodgeDecision(

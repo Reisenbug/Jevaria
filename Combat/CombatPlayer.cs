@@ -20,6 +20,7 @@ public sealed class CombatPlayer : ModPlayer
     private Task<DodgeDecision>? _request;
     private CombatSnapshot? _snapshot;
     private ulong _sequence;
+    private ulong _lastAppliedSequence;
     private ulong _nextRequestTick;
     private long _activeSince;
     private string _lastActionReason = "";
@@ -180,6 +181,12 @@ public sealed class CombatPlayer : ModPlayer
         {
             LastAction = _movement.Apply(Player, Decision!.Intent,
                 _snapshot with { Sequence = Decision.Sequence });
+            if (_lastAppliedSequence != Decision.Sequence)
+            {
+                _lastAppliedSequence = Decision.Sequence;
+                Mod.Logger.Info($"applied #{Decision.Sequence}: requested={LastAction.Requested}; " +
+                    $"applied={LastAction.Applied}; reason={LastAction.Reason}");
+            }
             if (LastAction.Reason != _lastActionReason)
             {
                 _lastActionReason = LastAction.Reason;

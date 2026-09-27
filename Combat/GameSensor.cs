@@ -89,6 +89,7 @@ public sealed class GameSensor : ICombatSensor
         Rectangle box = player.Hitbox;
         var world = new BoundaryDistances(box.Left, Main.maxTilesX * 16f - box.Right,
             box.Top, Main.maxTilesY * 16f - box.Bottom);
+        BoundaryDistances solid = ScanSolids(box);
         bool hasMount = player.miscEquips[3].type == ItemID.SlimySaddle;
         bool hasHook = player.miscEquips[4].shoot != ProjectileID.None && Main.projHook[player.miscEquips[4].shoot];
         for (int slot = 0; slot < 58 && !hasHook; slot++)
@@ -111,11 +112,13 @@ public sealed class GameSensor : ICombatSensor
             player.statLifeMax2, player.lifeRegen < 0,
             Entity(boss.whoAmI, BossName(boss), boss.Center, boss.velocity,
                 boss.width, boss.height, boss.damage), bosses, motion, parts, projectiles,
-            ScanSolids(box), world, ScanPlatformBelow(box),
+            solid, world, ScanPlatformBelow(box),
             player.dashType > 0 && player.dashDelay == 0,
             player.AnyExtraJumpUsable(), player.wingTime > 0f,
             hasHook, hasMount,
-            shotSpeed, shotType, player.HeldItem.Name, previous, previousDurationMs);
+            shotSpeed, shotType, player.HeldItem.Name,
+            GameMovement.AvailableActions(player, solid, world, hasHook, hasMount),
+            previous, previousDurationMs);
     }
 
     private static CombatEntity Entity(int id, string name, Vector2 center,

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Microsoft.Xna.Framework;
 using Terraria;
 using Terraria.ID;
@@ -7,6 +8,57 @@ namespace Jevaria.Combat;
 
 public sealed class GameMovement : IMovementDriver
 {
+    public static IReadOnlyList<DodgeOption> AvailableActions(Player player,
+        BoundaryDistances solid, BoundaryDistances world, bool hasHook, bool hasMount)
+    {
+        var options = new List<DodgeOption> { new(DodgeIntent.Idle, null) };
+        (int X, Magnitude Size)[] horizontal =
+        {
+            (0, Magnitude.None), (-1, Magnitude.Small), (-1, Magnitude.Medium),
+            (1, Magnitude.Small), (1, Magnitude.Medium)
+        };
+        (int Y, Magnitude Size)[] vertical =
+        {
+            (0, Magnitude.None), (-1, Magnitude.Small), (-1, Magnitude.Medium),
+            (-1, Magnitude.Large), (1, Magnitude.Small), (1, Magnitude.Large)
+        };
+        var hookTargets = new Dictionary<(int X, int Y, bool NearHorizontal), float?>();
+        float worldReserve = (GameSensor.WorldEdgeCells + GameSensor.EscapeReserveCells) * 16f;
+        float solidReserve = GameSensor.EscapeReserveCells * 16f;
+        foreach (var (x, horizontalSize) in horizontal)
+        foreach (var (y, verticalSize) in vertical)
+        {
+            if (x == 0 && y == 0) continue;
+            if (x < 0 && (world.Left <= worldReserve || solid.Left <= solidReserve) ||
+                x > 0 && (world.Right <= worldReserve || solid.Right <= solidReserve) ||
+                y < 0 && (world.Up <= worldReserve || solid.Up <= solidReserve) ||
+                y > 0 && (world.Down <= worldReserve || solid.Down <= solidReserve)) continue;
+            bool horizontalHook = horizontalSize == Magnitude.Medium;
+            bool verticalHook = y < 0 && verticalSize >= Magnitude.Medium;
+            bool upMount = y < 0 && verticalSize == Magnitude.Large;
+            bool downMount = y > 0 && verticalSize == Magnitude.Large;
+            if ((upMount || downMount) && !hasMount || downMount && horizontalHook) continue;
+            float? hookDistance = null;
+            if (horizontalHook || verticalHook)
+            {
+                var direction = (horizontalHook ? x : 0, verticalHook ? y : 0,
+                    horizontalHook && !verticalHook);
+                if (!hookTargets.TryGetValue(direction, out hookDistance))
+                {
+                    if (hasHook && TryHookPoint(player, direction.Item1, direction.Item2,
+                        direction.Item3, out Vector2 target))
+                        hookDistance = Vector2.Distance(player.Center, target) / 16f;
+                    hookTargets[direction] = hookDistance;
+                }
+                if (hookDistance is null && !upMount) continue;
+                if (hookDistance is null && horizontalHook) continue;
+            }
+            options.Add(new DodgeOption(new DodgeIntent(Compose(x, y), horizontalSize,
+                verticalSize, false), hookDistance));
+        }
+        return options;
+    }
+
     private ulong _hookSequence;
     private ulong _jumpSequence;
     private bool _autoHookActive;
@@ -70,7 +122,10 @@ public sealed class GameMovement : IMovementDriver
         if (_autoMountActive && ((!upMount && !downMount) || upMount && _autoMountForDown ||
             !_autoMountForDown && (_mountRiseSeen && player.velocity.Y >= 0f ||
             !_mountRiseSeen && Main.GameUpdateCount - _mountStartTick > 6)))
+        {
             DismountAuto(player);
+            reason = "slime dismount";
+        }
 
         if (horizontal == 0) horizontalSize = Magnitude.None;
         if (vertical == 0) verticalSize = Magnitude.None;
@@ -78,8 +133,12 @@ public sealed class GameMovement : IMovementDriver
         bool verticalHook = vertical < 0 && verticalSize >= Magnitude.Medium;
         bool wantHook = !downMount && (horizontalHook || verticalHook);
         float hookDistance = Vector2.Distance(player.Center, _hookTarget);
-        if (_autoHookActive && player.grapCount > 0 && hookDistance < _previousHookDistance - 0.1f)
+        if (_autoHookActive && player.grapCount > 0 && !_hookPulled &&
+            hookDistance < _previousHookDistance - 0.1f)
+        {
             _hookPulled = true;
+            reason = "grapple pulling";
+        }
         bool hookFinished = _autoHookActive && player.grapCount > 0 && _hookPulled &&
             hookDistance >= _previousHookDistance - 0.1f;
         if (_autoHookActive && (!wantHook ||
@@ -155,9 +214,21 @@ public sealed class GameMovement : IMovementDriver
                 _upMountSequence = snapshot.Sequence;
                 reason = "slime mount jump";
             }
+            else
+            {
+                verticalSize = Magnitude.Small;
+                reason = "slime mount unavailable";
+            }
         }
-        if (downMount && !_autoMountActive && MountAuto(player, true))
-            reason = "slime mount descent";
+        if (downMount && !_autoMountActive)
+        {
+            if (MountAuto(player, true)) reason = "slime mount descent";
+            else
+            {
+                verticalSize = Magnitude.Small;
+                reason = "slime mount unavailable";
+            }
+        }
         if (_autoMountActive && !_autoMountForDown && player.velocity.Y < -0.1f)
             _mountRiseSeen = true;
         var applied = new DodgeIntent(Compose(horizontal, vertical), horizontalSize, verticalSize, false);

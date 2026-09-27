@@ -62,12 +62,21 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
                 ? JevariaConfig.DefaultInstruction : config.Instruction }
             : new Dictionary<string, string> { [snapshot.Boss.Name] = string.IsNullOrWhiteSpace(config.GeneralInstruction)
                 ? JevariaConfig.DefaultGeneralInstruction : config.GeneralInstruction };
+        var options = snapshot.AvailableActions.ToDictionary(option => ActionName(option.Intent));
+        var criteria = options.ToDictionary(pair => pair.Key, pair => ActionDescription(pair.Value));
         var state = new
         {
             hp_percent = snapshot.Health * 100 / Math.Max(1, snapshot.MaxHealth),
             i_am_losing_health_over_time = snapshot.LosingHealthOverTime,
             my_speed_to_the_right = (int)(snapshot.Player.Velocity.X * 60f / 16f),
             my_speed_upward = (int)(-snapshot.Player.Velocity.Y * 60f / 16f),
+            movement = new
+            {
+                can_double_jump = snapshot.CanDoubleJump,
+                can_fly = snapshot.CanFly,
+                has_hook = snapshot.HasHook,
+                has_slimy_saddle = snapshot.HasMount
+            },
             threats = snapshot.Bosses.Concat(snapshot.Parts)
                 .GroupBy(entity => entity.Name)
                 .Select(group => group.OrderBy(entity => Vector2.DistanceSquared(entity.Center, snapshot.Player.Center)).First())
@@ -96,26 +105,13 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
         };
         var questions = new Dictionary<string, object>
         {
-            ["direction"] = Choice("Terraria boss fight. Which way should I move right now so that nothing hits me? Look at every boss part and shot, where each is heading and how soon it reaches me, and how much room I have. Frames until contact assumes our current velocities stay constant; use enemy health to identify its phase. Keep an escape route: do not run into a wall, floor or ceiling, or toward another threat. Follow the boss notes.", DirectionCriteria(snapshot)),
-            ["horizontal_size"] = Choice("Same moment. Choose the horizontal movement tool. Choose None if the chosen direction has no horizontal component. This does not limit travel distance.", new Dictionary<string, string>
-            {
-                ["None"] = "No horizontal movement.",
-                ["Small"] = "Run left or right. Use this for ordinary movement, even for a long retreat.",
-                ["Medium"] = "Run left or right and use a nearly horizontal grappling hook if a reachable surface is available. Choose only when a hook is needed."
-            }),
-            ["vertical_size"] = Choice("Same moment. Choose the vertical movement tool. Choose None if the chosen direction has no vertical component. This does not limit travel distance.", new Dictionary<string, string>
-            {
-                ["None"] = "No vertical movement.",
-                ["Small"] = "Up: jump, fly or use an available extra jump while holding W. Down: hold S to descend or pass through a platform.",
-                ["Medium"] = "Up: grapple if possible, then jump or use an extra jump while holding W. Down: same as Small; choose Small.",
-                ["Large"] = snapshot.HasMount
-                    ? "Up: grapple, jump or extra jump, then use Slimy Saddle while rising and dismount at the end of the rise. Down: mount Slimy Saddle and hold S; dismount when the action ends. Only choose this when the vertical movement needs the mount."
-                    : "Up: grapple, then jump or extra jump. Down: same as Small. Without Slimy Saddle, choose Medium for an upward grapple or Small for descent."
-            })
+            ["action"] = Choice("Choose one complete dodge action for the next reaction interval. Compare every boss body and projectile, their motion and damage, and room near solid and world boundaries. Frames until contact assumes current velocities remain constant. Prefer an action that leaves an escape route; sustained horizontal running at one height can let a pursuer catch up. A reachable grapple or mount may be needed for a sudden change in height or speed. Follow the boss notes. Every listed special tool is currently available. Continue the action until the next answer.", criteria)
         };
         string stateJson = JsonSerializer.Serialize(state);
         Terraria.ModLoader.ModContent.GetInstance<Jevaria>().Logger.Info(
             $"jev state #{snapshot.Sequence}: {stateJson}");
+        Terraria.ModLoader.ModContent.GetInstance<Jevaria>().Logger.Info(
+            $"action candidates #{snapshot.Sequence}: {string.Join(",", options.Keys)}");
 
         using var request = new HttpRequestMessage(HttpMethod.Post, "https://api.typesafe.ai/v1/systemone");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);
@@ -136,54 +132,71 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
         timer.Stop();
 
         JsonElement answers = body.RootElement.GetProperty("answers");
-        string direction = ChoiceValue(answers, "direction");
-        string horizontalSize = ChoiceValue(answers, "horizontal_size");
-        string verticalSize = ChoiceValue(answers, "vertical_size");
-        DodgeDirection chosenDirection = ParseDirection(direction);
-        (int x, int y) = Components(chosenDirection);
-        Magnitude chosenHorizontalSize = ParseMagnitude(horizontalSize);
-        Magnitude chosenVerticalSize = ParseMagnitude(verticalSize);
-
-        var intent = new DodgeIntent(
-            chosenDirection,
-            x == 0 ? Magnitude.None : chosenHorizontalSize == Magnitude.None ? Magnitude.Small : chosenHorizontalSize,
-            y == 0 ? Magnitude.None : chosenVerticalSize == Magnitude.None ? Magnitude.Small : chosenVerticalSize, false);
+        string chosenAction = ChoiceValue(answers, "action");
+        if (!options.TryGetValue(chosenAction, out DodgeOption chosen))
+            throw new FormatException($"unknown action: {chosenAction}");
 
         var probabilities = new Dictionary<string, IReadOnlyDictionary<string, float>>();
-        foreach (string name in new[] { "direction", "horizontal_size", "vertical_size" })
+        var values = new Dictionary<string, float>();
+        var horizontalProbabilities = new Dictionary<string, float>();
+        var verticalProbabilities = new Dictionary<string, float>();
+        var toolProbabilities = new Dictionary<string, float>();
+        foreach (JsonProperty value in answers.GetProperty("action").GetProperty("probabilities").EnumerateObject())
         {
-            var values = new Dictionary<string, float>();
-            foreach (JsonProperty value in answers.GetProperty(name).GetProperty("probabilities").EnumerateObject())
-                values[value.Name] = value.Value.GetSingle();
-            probabilities[name] = values;
+            values[value.Name] = value.Value.GetSingle();
+            if (!options.TryGetValue(value.Name, out DodgeOption option)) continue;
+            (int x, int y) = Components(option.Intent.Direction);
+            string horizontal = x == 0 ? "None" : $"{(x < 0 ? "Left" : "Right")}{option.Intent.HorizontalSize}";
+            string vertical = y == 0 ? "None" : $"{(y < 0 ? "Up" : "Down")}{option.Intent.VerticalSize}";
+            bool mount = option.Intent.VerticalSize == Magnitude.Large;
+            string tool = mount && option.HookDistanceCells is not null ? "HookAndMount" :
+                mount ? "Mount" : option.HookDistanceCells is not null ? "Hook" : "Ordinary";
+            AddProbability(horizontalProbabilities, horizontal, values[value.Name]);
+            AddProbability(verticalProbabilities, vertical, values[value.Name]);
+            AddProbability(toolProbabilities, tool, values[value.Name]);
         }
-        return new DodgeDecision(intent, probabilities, timer.ElapsedMilliseconds, snapshot.Sequence);
+        probabilities["action"] = values;
+        probabilities["horizontal"] = horizontalProbabilities;
+        probabilities["vertical"] = verticalProbabilities;
+        probabilities["tool"] = toolProbabilities;
+        return new DodgeDecision(chosen.Intent, probabilities, timer.ElapsedMilliseconds, snapshot.Sequence);
     }
+
+    private static void AddProbability(Dictionary<string, float> values, string key, float probability)
+        => values[key] = values.GetValueOrDefault(key) + probability;
 
     private static object Choice(string instructions, object criteria)
         => new { type = "choice", instructions, criteria };
 
-    private static Dictionary<string, string> DirectionCriteria(CombatSnapshot snapshot)
+    private static string ActionName(DodgeIntent intent)
     {
-        bool left = Room(snapshot.SolidDistances.Left, snapshot.WorldDistances.Left) <= GameSensor.EscapeReserveCells;
-        bool right = Room(snapshot.SolidDistances.Right, snapshot.WorldDistances.Right) <= GameSensor.EscapeReserveCells;
-        bool up = Room(snapshot.SolidDistances.Up, snapshot.WorldDistances.Up) <= GameSensor.EscapeReserveCells;
-        bool down = Room(snapshot.SolidDistances.Down, snapshot.WorldDistances.Down) <= GameSensor.EscapeReserveCells;
-        var choices = new Dictionary<string, string>();
-        foreach (DodgeDirection direction in Enum.GetValues<DodgeDirection>())
+        if (intent.Direction == DodgeDirection.Stay) return "Stay";
+        (int x, int y) = Components(intent.Direction);
+        string horizontal = x == 0 ? "" : $"{(x < 0 ? "Left" : "Right")}{intent.HorizontalSize}";
+        string vertical = y == 0 ? "" : $"{(y < 0 ? "Up" : "Down")}{intent.VerticalSize}";
+        return horizontal + vertical;
+    }
+
+    private static string ActionDescription(DodgeOption option)
+    {
+        DodgeIntent intent = option.Intent;
+        if (intent.Direction == DodgeDirection.Stay)
+            return "Stay only if no approaching threat requires movement and I have room to escape later.";
+        (int x, int y) = Components(intent.Direction);
+        string horizontal = x == 0 ? "" : $"Move {(x < 0 ? "left" : "right")}. ";
+        string hook = option.HookDistanceCells is float distance
+            ? $"Grapple toward a reachable surface {distance:0.#} cells away, then release. " : "";
+        string vertical = y switch
         {
-            if (direction == DodgeDirection.Stay) { choices["Stay"] = "Stay only if no threat is approaching and I am not near a boundary."; continue; }
-            (int x, int y) = Components(direction);
-            string horizontal = x < 0 ? "left" : "right";
-            string vertical = y < 0 ? "up" : "down";
-            string move = x == 0 ? $"Move straight {vertical}." : y == 0 ?
-                $"Move straight {horizontal}." : $"Move {vertical} and to the {horizontal}.";
-            bool xStop = x < 0 ? left : x > 0 && right;
-            bool yStop = y < 0 ? up : y > 0 && down;
-            if (xStop || yStop) continue;
-            choices[direction.ToString()] = move;
-        }
-        return choices;
+            < 0 when intent.VerticalSize == Magnitude.Large =>
+                "Jump or use an extra jump while holding W, mount Slimy Saddle during the rise, then dismount at the apex. ",
+            < 0 => "Jump or use an extra jump while holding W. ",
+            > 0 when intent.VerticalSize == Magnitude.Large =>
+                "Mount Slimy Saddle and hold S to descend, then dismount when the next action begins. ",
+            > 0 => "Hold S to descend or pass through a platform. ",
+            _ => ""
+        };
+        return horizontal + hook + vertical;
     }
 
     private static (int X, int Y) Components(DodgeDirection direction) => direction switch
@@ -194,9 +207,6 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
         DodgeDirection.Left => (-1, 0), DodgeDirection.UpLeft => (-1, -1),
         _ => (0, 0)
     };
-
-    private static DodgeDirection ParseDirection(string value)
-        => Enum.TryParse(value, out DodgeDirection direction) ? direction : DodgeDirection.Stay;
 
     private static int Room(float solid, float world)
         => (int)Math.Clamp(Math.Min(solid, world - GameSensor.WorldEdgeCells * 16f) / 16f, 0f, 60f);
@@ -256,15 +266,6 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
     private static string ChoiceValue(JsonElement answers, string name)
         => answers.GetProperty(name).GetProperty("choice").GetString()
            ?? throw new FormatException(name);
-
-    private static Magnitude ParseMagnitude(string value) => value switch
-    {
-        "None" => Magnitude.None,
-        "Small" => Magnitude.Small,
-        "Medium" => Magnitude.Medium,
-        "Large" => Magnitude.Large,
-        _ => throw new FormatException("magnitude")
-    };
 
     public void Dispose() => _client.Dispose();
 }
