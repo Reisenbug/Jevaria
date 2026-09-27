@@ -104,18 +104,11 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
                 large = "Use an available grapple for a larger sideways move"
             }),
             ["vertical_magnitude"] = Choice("If moving vertically, how much movement is needed?",
-                snapshot.HasMount
-                    ? new Dictionary<string, string>
-                    {
-                        ["small"] = "Ordinary jump, wing flight, or dropping one platform is sufficient",
-                        ["medium"] = "Use an available grapple or sustained downward movement",
-                        ["large"] = "Use an available mount as well as the vertical action"
-                    }
-                    : new Dictionary<string, string>
-                    {
-                        ["small"] = "Ordinary jump, wing flight, or dropping one platform is sufficient",
-                        ["medium"] = "Use an available grapple or sustained downward movement"
-                    }),
+                new Dictionary<string, string>
+                {
+                    ["small"] = "Ordinary jump, wing flight, or dropping one platform is sufficient",
+                    ["medium"] = "Use an available grapple or sustained downward movement"
+                }),
             ["dash"] = new
             {
                 type = "noul",

@@ -7,7 +7,6 @@ namespace Jevaria.Combat;
 public sealed class GameMovement : IMovementDriver
 {
     private ulong _hookSequence;
-    private ulong _mountSequence;
     private ulong _dashSequence;
     private ulong _jumpSequence;
     private ulong _dropSequence;
@@ -108,22 +107,11 @@ public sealed class GameMovement : IMovementDriver
         }
         else player.controlHook = false;
 
-        bool wantMount = vertical != Direction.None && vMagnitude == Magnitude.Large;
-        if (wantMount && _mountSequence != snapshot.Sequence)
+        if (vertical != Direction.None && vMagnitude == Magnitude.Large)
         {
-            _mountSequence = snapshot.Sequence;
-            if (snapshot.HasMount && !player.mount.Active)
-            {
-                player.releaseMount = true;
-                player.controlMount = true;
-            }
-            else if (!snapshot.HasMount)
-            {
-                vMagnitude = Magnitude.Medium;
-                reason = "mount unavailable";
-            }
+            vMagnitude = Magnitude.Medium;
+            reason = "mount outside first test";
         }
-        else player.controlMount = false;
 
         bool dash = intent.Dash && horizontal != Direction.None && snapshot.CanDash;
         if (dash && _dashSequence != snapshot.Sequence)
@@ -143,7 +131,7 @@ public sealed class GameMovement : IMovementDriver
     {
         player.controlLeft = player.controlRight = false;
         player.controlUp = player.controlDown = false;
-        player.controlJump = player.controlHook = player.controlMount = false;
+        player.controlJump = player.controlHook = false;
     }
 
     private static bool TryHookPoint(Player player, Direction horizontal,
