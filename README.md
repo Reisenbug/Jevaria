@@ -2,6 +2,10 @@
 
 Jev 驱动的 Terraria Boss 战实验模组。Jev 每次选择一条躲避方向和幅度；模组读取战况、执行按键并用弹速与 Boss 速度计算提前量。
 
+## 下载
+
+从 [GitHub Releases](https://github.com/Reisenbug/Jevaria/releases) 下载 `Jevaria.tmod`，放入 tModLoader 的 `Mods` 目录并在游戏内启用。Release 中的 `Jevaria.dll` 是编译后的程序集，不能代替 `.tmod` 直接安装。
+
 ## 运行
 
 1. 使用 tModLoader 2026.07 构建并启用 `Jevaria`。
@@ -26,6 +30,6 @@ Boss 出现时自动选中快捷栏 0–9 格里最靠前的武器；手动切�
 
 ## 验证范围
 
-目前通过 C# 编译。游戏内动作效果、真实 API 延迟、实战命中率和 Boss 击杀尚需实际加载与战斗验证。瞄准模型暂按匀速直线弹幕处理；有重力、追踪或特殊发射行为的武器需要单独适配。Boss 配件通过 `NPC.realLife` 和常见部件类型识别，其他关联机制需逐个 Boss 验证。
+已在双子魔眼实战中验证基本战斗流程；单次演示不代表稳定通关或适用于其他 Boss。瞄准模型暂按匀速直线弹幕处理；有重力、追踪或特殊发射行为的武器需要单独适配。Boss 配件通过 `NPC.realLife` 和常见部件类型识别，其他关联机制需逐个 Boss 验证。
 
 架构与实施顺序见 [DESIGN.md](DESIGN.md)。
