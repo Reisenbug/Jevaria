@@ -68,6 +68,8 @@ public sealed class CombatPlayer : ModPlayer
             return;
         }
 
+        _sensor.Observe(Player);
+
         if (_request?.IsCompleted == true) ReceiveDecision();
 
         if (_request == null && Main.GameUpdateCount >= _nextRequestTick)

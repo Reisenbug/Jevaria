@@ -18,13 +18,34 @@ public sealed class JevariaConfig : ModConfig
     public string ApiKey = "";
 
     public string Instruction =
-        "You control dodging in a Terraria boss fight. Choose movement that avoids imminent " +
-        "high-damage contacts and projectiles while preserving room to move. Avoid lingering " +
-        "near solid walls or world edges. Use positions and velocities in pixels and pixels " +
-        "per game tick. The action lasts until the next answer, usually about 300 ms. " +
-        "Small means ordinary movement, medium uses an available movement ability, and large " +
-        "may use a grapple or mount. Decide direction and strength for each axis independently. " +
-        "Only request a dash when a dash is available and its timing helps avoid a threat.";
+        "Begin when the Twins appear. The Twins are two independently flying eyes. Focus damage " +
+        "on Spazmatism, the green fire eye, but dodge both eyes. Avoid body contact first. " +
+        "In phase one Spazmatism retreats when approached and follows when the player retreats, " +
+        "so chasing it horizontally does not reliably control distance and can run into its " +
+        "shots. Within 30 tiles (480 pixels) of Spazmatism is dangerous: its fire can reach " +
+        "the player and there may be too little time to react to a charge. Stay farther away " +
+        "when possible. Spazmatism keeps pursuing outside its charges, so keep changing height " +
+        "when there is room. A charge targets the player's position at its start; change " +
+        "horizontal or vertical direction to make it miss, using both axes when needed. " +
+        "At half health Spazmatism enters phase two, cycling between a sustained stream of " +
+        "fire and six charges. Fire is continuous and repeated exposure hurts every tick; " +
+        "move out immediately when it starts hitting. Closer exposure is worse. Keep distance " +
+        "from phase-two Spazmatism even between fire attacks. Its charge contact is more " +
+        "dangerous than the fire. For a charge, change direction as it approaches, then use " +
+        "the slower interval to restore distance and attack. In `boss_motion`, compare " +
+        "`boss_speed_cells_per_second` with `boss_fastest_in_the_last_second` for Spazmatism: " +
+        "a high current speed near its recent maximum can indicate a charge; a drop can " +
+        "indicate that charge has ended. Also consider the absolute speed, because a slow " +
+        "recent maximum alone is not a charge. Spazmatism's projectiles can add debuffs, so " +
+        "their cost exceeds their listed damage. Retinazer's main danger is collision, not " +
+        "its lasers; do not make a dangerous move just to avoid a weak laser. Both bodies " +
+        "can collide with the player. `bosses` contains both active eyes, while `boss` is " +
+        "the attack target. Avoid fleeing from one eye into the other; seek a direction clear " +
+        "of both. When caught between them, move away from Spazmatism first. Avoid lingering " +
+        "near solid or world boundaries. Positions are pixels and velocities are pixels per " +
+        "game tick. Each action lasts until the next Jev answer, usually about 300 ms. " +
+        "The first test has wings, an extra jump, and a grapple, but no mount. Choose " +
+        "direction and strength for each axis. Request a dash only if available and timely.";
 }
 
 public sealed class JevBrain : IDodgeBrain, IDisposable
@@ -48,6 +69,8 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
             player = snapshot.Player,
             health = snapshot.Health,
             boss = snapshot.Boss,
+            bosses = snapshot.Bosses,
+            boss_motion = snapshot.BossMotion,
             parts = snapshot.Parts,
             projectiles = snapshot.Projectiles,
             solid_distances = snapshot.SolidDistances,
@@ -80,12 +103,19 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
                 medium = "Use an available extra jump while moving sideways",
                 large = "Use an available grapple for a larger sideways move"
             }),
-            ["vertical_magnitude"] = Choice("If moving vertically, how much movement is needed?", new
-            {
-                small = "Ordinary jump, flight, or dropping one platform is sufficient",
-                medium = "Use an available grapple or sustained downward movement",
-                large = "Use an available mount as well as the vertical action"
-            }),
+            ["vertical_magnitude"] = Choice("If moving vertically, how much movement is needed?",
+                snapshot.HasMount
+                    ? new Dictionary<string, string>
+                    {
+                        ["small"] = "Ordinary jump, wing flight, or dropping one platform is sufficient",
+                        ["medium"] = "Use an available grapple or sustained downward movement",
+                        ["large"] = "Use an available mount as well as the vertical action"
+                    }
+                    : new Dictionary<string, string>
+                    {
+                        ["small"] = "Ordinary jump, wing flight, or dropping one platform is sufficient",
+                        ["medium"] = "Use an available grapple or sustained downward movement"
+                    }),
             ["dash"] = new
             {
                 type = "noul",
@@ -103,7 +133,11 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
         request.Content = new StringContent(JsonSerializer.Serialize(new
         {
             model = "jev-latest", state, questions
-        }, new JsonSerializerOptions { IncludeFields = true }), Encoding.UTF8, "application/json");
+        }, new JsonSerializerOptions
+        {
+            IncludeFields = true,
+            PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower
+        }), Encoding.UTF8, "application/json");
 
         var timer = Stopwatch.StartNew();
         using var response = await _client.SendAsync(request, cancellationToken).ConfigureAwait(false);

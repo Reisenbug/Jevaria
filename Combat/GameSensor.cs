@@ -8,26 +8,59 @@ namespace Jevaria.Combat;
 
 public sealed class GameSensor : ICombatSensor
 {
+    private readonly Dictionary<int, Queue<(ulong Tick, float Speed)>> _speedHistory = new();
+
+    public void Observe(Player player)
+    {
+        ulong now = Main.GameUpdateCount;
+        foreach (NPC npc in Main.npc)
+        {
+            if (!npc.active || !IsTwin(npc)) continue;
+            if (!_speedHistory.TryGetValue(npc.whoAmI, out var history))
+                _speedHistory[npc.whoAmI] = history = new Queue<(ulong, float)>();
+            history.Enqueue((now, npc.velocity.Length() * 60f / 16f));
+            while (history.Count > 0 && now - history.Peek().Tick > 60)
+                history.Dequeue();
+        }
+    }
+
     public CombatSnapshot? Capture(Player player, ulong sequence, DodgeIntent previous, long previousDurationMs)
     {
+        var activeBosses = new List<NPC>();
         NPC? boss = null;
         float closest = float.MaxValue;
         foreach (NPC npc in Main.npc)
         {
-            if (!npc.active || !npc.boss || npc.friendly) continue;
+            if (!npc.active || !IsTwin(npc)) continue;
+            activeBosses.Add(npc);
+            if (npc.type == NPCID.Spazmatism) boss = npc;
             float distance = Vector2.DistanceSquared(player.Center, npc.Center);
-            if (distance >= closest) continue;
+            if (boss?.type == NPCID.Spazmatism || distance >= closest) continue;
             closest = distance;
             boss = npc;
         }
 
         if (boss is null) return null;
 
+        var bosses = new List<CombatEntity>();
+        var motion = new List<BossMotion>();
+        var bossIds = new HashSet<int>();
+        foreach (NPC npc in activeBosses)
+        {
+            bossIds.Add(npc.whoAmI);
+            bosses.Add(Entity(npc.whoAmI, TwinName(npc), npc.Center, npc.velocity,
+                npc.width, npc.height, npc.damage));
+            float speed = npc.velocity.Length() * 60f / 16f;
+            float fastest = speed;
+            if (_speedHistory.TryGetValue(npc.whoAmI, out var history))
+                foreach (var sample in history) fastest = Math.Max(fastest, sample.Speed);
+            motion.Add(new BossMotion(npc.whoAmI, speed, fastest, npc.life, npc.lifeMax));
+        }
         var parts = new List<CombatEntity>();
         foreach (NPC npc in Main.npc)
         {
             if (!npc.active || npc.friendly || npc.whoAmI == boss.whoAmI) continue;
-            if (npc.realLife == boss.whoAmI)
+            if (bossIds.Contains(npc.realLife))
                 parts.Add(Entity(npc.whoAmI, npc.FullName, npc.Center, npc.velocity,
                     npc.width, npc.height, npc.damage));
         }
@@ -47,24 +80,34 @@ public sealed class GameSensor : ICombatSensor
             box.Top, Main.maxTilesY * 16f - box.Bottom);
         bool hasMount = player.miscEquips[3].mountType >= MountID.Rudolph;
         float shotSpeed = player.HeldItem.shootSpeed;
+        int shotType = player.HeldItem.shoot;
         if (player.HeldItem.useAmmo != AmmoID.None &&
-            !player.PickAmmo(player.HeldItem, out _, out shotSpeed, out _, out _, out _, true))
+            !player.PickAmmo(player.HeldItem, out shotType, out shotSpeed, out _, out _, out _, true))
             shotSpeed = 0f;
+        if (ContentSamples.ProjectilesByType.TryGetValue(shotType, out Projectile? projectileDefaults) &&
+            projectileDefaults is not null)
+            shotSpeed *= projectileDefaults.extraUpdates + 1;
 
         return new CombatSnapshot(sequence, Main.GameUpdateCount,
             Entity(player.whoAmI, player.name, player.Center, player.velocity,
                 player.width, player.height, 0), player.statLife,
-            Entity(boss.whoAmI, boss.FullName, boss.Center, boss.velocity,
-                boss.width, boss.height, boss.damage), parts, projectiles,
+            Entity(boss.whoAmI, TwinName(boss), boss.Center, boss.velocity,
+                boss.width, boss.height, boss.damage), bosses, motion, parts, projectiles,
             ScanSolids(box), world, player.dashType > 0 && player.dashDelay == 0,
             player.AnyExtraJumpUsable(), player.wingTime > 0f,
             player.miscEquips[4].shoot != ProjectileID.None, hasMount,
-            shotSpeed, player.HeldItem.Name, previous, previousDurationMs);
+            shotSpeed, shotType, player.HeldItem.Name, previous, previousDurationMs);
     }
 
     private static CombatEntity Entity(int id, string name, Vector2 center,
         Vector2 velocity, int width, int height, int damage)
         => new(id, name, center, velocity, new Vector2(width, height), damage);
+
+    private static bool IsTwin(NPC npc)
+        => npc.type is NPCID.Spazmatism or NPCID.Retinazer;
+
+    private static string TwinName(NPC npc)
+        => npc.type == NPCID.Spazmatism ? "Spazmatism" : "Retinazer";
 
     private static BoundaryDistances ScanSolids(Rectangle box)
     {

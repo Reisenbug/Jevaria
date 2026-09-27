@@ -25,13 +25,19 @@ public readonly record struct CombatEntity(
 public readonly record struct BoundaryDistances(
     float Left, float Right, float Up, float Down);
 
+public readonly record struct BossMotion(
+    int Id, float BossSpeedCellsPerSecond, float BossFastestInTheLastSecond,
+    int Health, int MaxHealth);
+
 public sealed record CombatSnapshot(
     ulong Sequence, ulong Tick, CombatEntity Player, int Health,
-    CombatEntity Boss, IReadOnlyList<CombatEntity> Parts,
+    CombatEntity Boss, IReadOnlyList<CombatEntity> Bosses,
+    IReadOnlyList<BossMotion> BossMotion,
+    IReadOnlyList<CombatEntity> Parts,
     IReadOnlyList<CombatEntity> Projectiles,
     BoundaryDistances SolidDistances, BoundaryDistances WorldDistances,
     bool CanDash, bool CanDoubleJump, bool CanFly, bool HasHook,
-    bool HasMount, float ShotSpeed, string WeaponName,
+    bool HasMount, float ShotSpeed, int ShotProjectileType, string WeaponName,
     DodgeIntent PreviousIntent, long PreviousDurationMs);
 
 public sealed record DodgeDecision(
@@ -42,6 +48,7 @@ public readonly record struct ActionResult(DodgeIntent Requested, DodgeIntent Ap
 
 public interface ICombatSensor
 {
+    void Observe(Player player);
     CombatSnapshot? Capture(Player player, ulong sequence, DodgeIntent previous, long previousDurationMs);
 }
 

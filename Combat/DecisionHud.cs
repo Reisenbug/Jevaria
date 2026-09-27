@@ -47,6 +47,17 @@ public sealed class DecisionHud : ModSystem
         }
         if (combat.Snapshot is { } snapshot)
         {
+            text.Append("\nbosses");
+            foreach (CombatEntity boss in snapshot.Bosses)
+                text.Append(' ').Append(boss.Name).Append('#').Append(boss.Id);
+            foreach (BossMotion motion in snapshot.BossMotion)
+                text.Append("\n#").Append(motion.Id).Append(" HP ")
+                    .Append(motion.Health).Append('/').Append(motion.MaxHealth)
+                    .Append(" speed ").Append(motion.BossSpeedCellsPerSecond.ToString("0.0"))
+                    .Append('/').Append(motion.BossFastestInTheLastSecond.ToString("0.0"));
+            text.Append("\nshot ").Append(snapshot.WeaponName)
+                .Append(" projectile#").Append(snapshot.ShotProjectileType)
+                .Append(" speed ").Append(snapshot.ShotSpeed.ToString("0.0"));
             text.Append("\nsolid L/R/U/D ")
                 .Append((int)snapshot.SolidDistances.Left).Append('/')
                 .Append((int)snapshot.SolidDistances.Right).Append('/')
