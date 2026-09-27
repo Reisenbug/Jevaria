@@ -31,16 +31,18 @@ public sealed class GameMovement : IMovementDriver
         BoundaryDistances world = new(box.Left, Main.maxTilesX * 16f - box.Right,
             box.Top, Main.maxTilesY * 16f - box.Bottom);
 
-        if (world.Left < 80f || solid.Left < 32f)
+        float worldReserve = (GameSensor.WorldEdgeCells + GameSensor.EscapeReserveCells) * 16f;
+        float solidReserve = GameSensor.EscapeReserveCells * 16f;
+        if (world.Left <= worldReserve || solid.Left <= solidReserve)
             if (horizontal < 0) { horizontal = 0; reason = "left blocked"; }
-        if (world.Right < 80f || solid.Right < 32f)
+        if (world.Right <= worldReserve || solid.Right <= solidReserve)
             if (horizontal > 0) { horizontal = 0; reason = "right blocked"; }
 
-        if (world.Up < 64f || solid.Up < 24f)
+        if (world.Up <= worldReserve || solid.Up <= solidReserve)
         {
             if (vertical < 0) { vertical = 0; reason = "upper boundary"; }
         }
-        if (world.Down < 64f || solid.Down < 24f)
+        if (world.Down <= worldReserve || solid.Down <= solidReserve)
         {
             if (vertical > 0) { vertical = 0; reason = "lower boundary"; }
         }

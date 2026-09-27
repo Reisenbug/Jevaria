@@ -8,6 +8,8 @@ namespace Jevaria.Combat;
 
 public sealed class GameSensor : ICombatSensor
 {
+    public const int WorldEdgeCells = 40;
+    public const int EscapeReserveCells = 10;
     private readonly Dictionary<int, Queue<(ulong Tick, float Speed)>> _speedHistory = new();
 
     public bool Observe(Player player)

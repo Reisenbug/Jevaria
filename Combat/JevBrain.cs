@@ -150,14 +150,14 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
 
     private static Dictionary<string, string> DirectionCriteria(CombatSnapshot snapshot)
     {
-        bool left = Room(snapshot.SolidDistances.Left, snapshot.WorldDistances.Left) == 0;
-        bool right = Room(snapshot.SolidDistances.Right, snapshot.WorldDistances.Right) == 0;
-        bool up = Room(snapshot.SolidDistances.Up, snapshot.WorldDistances.Up) == 0;
-        bool down = Room(snapshot.SolidDistances.Down, snapshot.WorldDistances.Down) == 0;
+        bool left = Room(snapshot.SolidDistances.Left, snapshot.WorldDistances.Left) <= GameSensor.EscapeReserveCells;
+        bool right = Room(snapshot.SolidDistances.Right, snapshot.WorldDistances.Right) <= GameSensor.EscapeReserveCells;
+        bool up = Room(snapshot.SolidDistances.Up, snapshot.WorldDistances.Up) <= GameSensor.EscapeReserveCells;
+        bool down = Room(snapshot.SolidDistances.Down, snapshot.WorldDistances.Down) <= GameSensor.EscapeReserveCells;
         var choices = new Dictionary<string, string>();
         foreach (DodgeDirection direction in Enum.GetValues<DodgeDirection>())
         {
-            if (direction == DodgeDirection.Stay) { choices["Stay"] = "Stay where I am."; continue; }
+            if (direction == DodgeDirection.Stay) { choices["Stay"] = "Stay only if no threat is approaching and I am not near a boundary."; continue; }
             (int x, int y) = Components(direction);
             string horizontal = x < 0 ? "left" : "right";
             string vertical = y < 0 ? "up" : "down";
@@ -165,12 +165,8 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
                 $"Move straight {horizontal}." : $"Move {vertical} and to the {horizontal}.";
             bool xStop = x < 0 ? left : x > 0 && right;
             bool yStop = y < 0 ? up : y > 0 && down;
-            string note = (x == 0 || xStop) && (y == 0 || yStop)
-                ? $" Blocked: {(y < 0 ? "a ceiling" : y > 0 ? "the floor" : "a wall")}{(x != 0 && y != 0 ? " and a wall are" : " is")} right there, so moving this way does nothing."
-                : xStop ? $" The {horizontal} part is blocked by a wall; I would only move {vertical}."
-                : yStop ? $" The {vertical} part is blocked by {(y < 0 ? "a ceiling" : "the floor")}; I would only move {horizontal}."
-                : "";
-            choices[direction.ToString()] = move + note;
+            if (xStop || yStop) continue;
+            choices[direction.ToString()] = move;
         }
         return choices;
     }
@@ -188,7 +184,7 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
         => Enum.TryParse(value, out DodgeDirection direction) ? direction : DodgeDirection.Stay;
 
     private static int Room(float solid, float world)
-        => (int)Math.Clamp(Math.Min(solid, world - 40f * 16f) / 16f, 0f, 60f);
+        => (int)Math.Clamp(Math.Min(solid, world - GameSensor.WorldEdgeCells * 16f) / 16f, 0f, 60f);
 
     private static object BossThreat(CombatEntity entity, CombatSnapshot snapshot)
         => new
