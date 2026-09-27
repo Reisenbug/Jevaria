@@ -114,7 +114,7 @@ public sealed class GameSensor : ICombatSensor
         _ => npc.FullName
     };
 
-    private static BoundaryDistances ScanSolids(Rectangle box)
+    public static BoundaryDistances ScanSolids(Rectangle box)
     {
         float left = 1600f, right = 1600f, up = 1600f, down = 1600f;
         int x0 = Math.Max(0, box.Left / 16);

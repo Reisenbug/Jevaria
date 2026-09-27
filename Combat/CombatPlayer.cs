@@ -235,16 +235,19 @@ public sealed class CombatPlayer : ModPlayer
         Status = "acting";
         Mod.Logger.Info($"decision #{answer.Sequence}: {answer.Intent}; " +
             $"latency={answer.LatencyMs}ms; previous_action={previousAgeMs}ms; probabilities={JsonSerializer.Serialize(answer.Probabilities)}");
-        string horizontal = answer.Intent.Horizontal switch
+        string direction = answer.Intent.Direction switch
         {
-            Direction.Negative => "←", Direction.Positive => "→", _ => "·"
+            DodgeDirection.Up => "↑",
+            DodgeDirection.UpRight => "↗",
+            DodgeDirection.Right => "→",
+            DodgeDirection.DownRight => "↘",
+            DodgeDirection.Down => "↓",
+            DodgeDirection.DownLeft => "↙",
+            DodgeDirection.Left => "←",
+            DodgeDirection.UpLeft => "↖",
+            _ => "·"
         };
-        string vertical = answer.Intent.Vertical switch
-        {
-            Direction.Negative => "↑", Direction.Positive => "↓", _ => "·"
-        };
-        Main.NewText($"[Jev #{answer.Sequence}] {horizontal}{vertical} " +
-            $"{answer.Intent.HorizontalMagnitude}/{answer.Intent.VerticalMagnitude}" +
+        Main.NewText($"[Jev #{answer.Sequence}] {direction} {answer.Intent.Size}" +
             (answer.Intent.Dash ? " dash" : "") + $" {answer.LatencyMs}ms", Color.Orange);
     }
 

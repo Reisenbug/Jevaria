@@ -31,8 +31,8 @@ public sealed class JevariaConfig : ModConfig
         "velocities are pixels per game tick. `frames_until_player_contact` estimates " +
         "time to collision if current velocities continue; -1 means no predicted collision. " +
         "Incoming projectiles are ordered by predicted contact time. Each action lasts until the next Jev answer, " +
-        "usually about 300 ms. Choose direction and strength for each axis using the " +
-        "available abilities. Request a dash only if available and useful now.";
+        "usually about 300 ms. Choose one joint direction for the whole route, then " +
+        "choose one movement size for that route. Request a dash only if available and useful now.";
 
     public string Instruction =
         "The Twins are two independently flying eyes. Focus damage " +
@@ -117,44 +117,13 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
         };
         var questions = new Dictionary<string, object>
         {
-            ["horizontal"] = Choice("Which horizontal direction should the player move now?", new
+            ["direction"] = Choice("Choose one direction for the complete dodge route. Consider both eyes, projectiles, and the available room together.", DirectionCriteria(snapshot)),
+            ["magnitude"] = Choice("How much movement is needed to evade the current threats?", new Dictionary<string, string>
             {
-                left = snapshot.WorldDistances.Left < 80f || snapshot.SolidDistances.Left < 32f
-                    ? "Blocked by the world edge or a nearby wall; do not choose left"
-                    : "Move left to avoid danger and keep room for the next action",
-                none = "No horizontal movement is useful now",
-                right = snapshot.WorldDistances.Right < 80f || snapshot.SolidDistances.Right < 32f
-                    ? "Blocked by the world edge or a nearby wall; do not choose right"
-                    : "Move right to avoid danger and keep room for the next action"
+                ["small"] = "Ordinary movement, wings, or a short platform drop is enough",
+                ["medium"] = "Use an extra jump for an upward route; hold down for the full action for a downward route; sideways movement remains ordinary",
+                ["large"] = "A grappling hook along the route is useful and a suitable surface is reachable"
             }),
-            ["vertical"] = Choice("Which vertical direction should the player move now?", new
-            {
-                up = snapshot.WorldDistances.Up < 64f || snapshot.SolidDistances.Up < 24f
-                    ? "Blocked by a solid ceiling; do not choose up"
-                    : snapshot.SolidDistances.Up < 64f
-                        ? "Very little room above; choose up only to avoid an immediate threat there"
-                        : "Move upward to avoid danger and keep room for the next action",
-                none = "No vertical movement is useful now",
-                down = snapshot.WorldDistances.Down < 64f || snapshot.SolidDistances.Down < 24f
-                    ? "Blocked by the world bottom or solid ground; do not choose down"
-                    : snapshot.PlatformDistanceBelow <= 8f
-                    ? "A one-way platform is directly underfoot; move down to drop below it if the space below is safe"
-                    : snapshot.SolidDistances.Up < 64f
-                        ? "Descend away from the ceiling if the path is safe; down passes through platforms"
-                        : "Move downward to avoid danger and keep room for the next action; down passes through platforms"
-            }),
-            ["horizontal_magnitude"] = Choice("If moving horizontally, how much movement is needed?", new
-            {
-                small = "Ordinary left or right movement is sufficient",
-                medium = "Use an available extra jump while moving sideways",
-                large = "Use an available grapple for a larger sideways move"
-            }),
-            ["vertical_magnitude"] = Choice("If moving vertically, how much movement is needed?",
-                new Dictionary<string, string>
-                {
-                    ["small"] = "Ordinary jump, wing flight, or dropping one platform is sufficient",
-                    ["medium"] = "Use an available grapple or sustained downward movement"
-                }),
             ["dash"] = new
             {
                 type = "noul",
@@ -186,20 +155,16 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
         timer.Stop();
 
         JsonElement answers = body.RootElement.GetProperty("answers");
-        string horizontal = ChoiceValue(answers, "horizontal");
-        string vertical = ChoiceValue(answers, "vertical");
-        string hMagnitude = ChoiceValue(answers, "horizontal_magnitude");
-        string vMagnitude = ChoiceValue(answers, "vertical_magnitude");
+        string direction = ChoiceValue(answers, "direction");
+        string magnitude = ChoiceValue(answers, "magnitude");
         bool dash = answers.GetProperty("dash").GetProperty("noul").GetSingle() >= 0.5f;
 
         var intent = new DodgeIntent(
-            horizontal switch { "left" => Direction.Negative, "right" => Direction.Positive, "none" => Direction.None, _ => throw new FormatException("horizontal") },
-            vertical switch { "up" => Direction.Negative, "down" => Direction.Positive, "none" => Direction.None, _ => throw new FormatException("vertical") },
-            horizontal == "none" ? Magnitude.None : ParseMagnitude(hMagnitude),
-            vertical == "none" ? Magnitude.None : ParseMagnitude(vMagnitude), dash);
+            ParseDirection(direction),
+            direction == "stay" ? Magnitude.None : ParseMagnitude(magnitude), dash);
 
         var probabilities = new Dictionary<string, IReadOnlyDictionary<string, float>>();
-        foreach (string name in new[] { "horizontal", "vertical", "horizontal_magnitude", "vertical_magnitude" })
+        foreach (string name in new[] { "direction", "magnitude" })
         {
             var values = new Dictionary<string, float>();
             foreach (JsonProperty value in answers.GetProperty(name).GetProperty("probabilities").EnumerateObject())
@@ -216,6 +181,46 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
 
     private static object Choice(string instructions, object criteria)
         => new { type = "choice", instructions, criteria };
+
+    private static Dictionary<string, string> DirectionCriteria(CombatSnapshot snapshot)
+    {
+        bool left = snapshot.WorldDistances.Left < 80f || snapshot.SolidDistances.Left < 32f;
+        bool right = snapshot.WorldDistances.Right < 80f || snapshot.SolidDistances.Right < 32f;
+        bool up = snapshot.WorldDistances.Up < 64f || snapshot.SolidDistances.Up < 24f;
+        bool down = snapshot.WorldDistances.Down < 64f || snapshot.SolidDistances.Down < 24f;
+        string upText = up ? "up is blocked by a ceiling or world edge" :
+            snapshot.SolidDistances.Up < 64f ? "little room remains above" : "upward movement is available";
+        string downText = down ? "down is blocked by solid ground or the world edge" :
+            snapshot.PlatformDistanceBelow <= 8f ? "down passes through the platform directly underfoot" : "down passes through one-way platforms";
+        string leftText = left ? "left is blocked by a wall or world edge" : "leftward movement is available";
+        string rightText = right ? "right is blocked by a wall or world edge" : "rightward movement is available";
+        return new Dictionary<string, string>
+        {
+            ["up"] = $"Move up to avoid threats; {upText}.",
+            ["up_right"] = $"Move up and right to avoid threats; {upText}, and {rightText}.",
+            ["right"] = $"Move right to avoid threats; {rightText}.",
+            ["down_right"] = $"Move down and right to avoid threats; {downText}, and {rightText}.",
+            ["down"] = $"Move down to avoid threats; {downText}.",
+            ["down_left"] = $"Move down and left to avoid threats; {downText}, and {leftText}.",
+            ["left"] = $"Move left to avoid threats; {leftText}.",
+            ["up_left"] = $"Move up and left to avoid threats; {upText}, and {leftText}.",
+            ["stay"] = "Stay where you are only if moving in every direction is more dangerous."
+        };
+    }
+
+    private static DodgeDirection ParseDirection(string value) => value switch
+    {
+        "up" => DodgeDirection.Up,
+        "up_right" => DodgeDirection.UpRight,
+        "right" => DodgeDirection.Right,
+        "down_right" => DodgeDirection.DownRight,
+        "down" => DodgeDirection.Down,
+        "down_left" => DodgeDirection.DownLeft,
+        "left" => DodgeDirection.Left,
+        "up_left" => DodgeDirection.UpLeft,
+        "stay" => DodgeDirection.Stay,
+        _ => throw new FormatException("direction")
+    };
 
     private static object Threat(CombatEntity entity, CombatSnapshot snapshot)
         => new

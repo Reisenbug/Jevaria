@@ -23,32 +23,35 @@ public sealed class GameMovement : IMovementDriver
     {
         if (!intent.Valid) return new ActionResult(intent, DodgeIntent.Idle, "invalid intent");
 
-        Direction horizontal = intent.Horizontal;
-        Direction vertical = intent.Vertical;
-        Magnitude hMagnitude = intent.HorizontalMagnitude;
-        Magnitude vMagnitude = intent.VerticalMagnitude;
+        (int horizontal, int vertical) = Components(intent.Direction);
+        Magnitude size = intent.Size;
         string reason = "";
+        Rectangle box = player.Hitbox;
+        BoundaryDistances solid = GameSensor.ScanSolids(box);
+        BoundaryDistances world = new(box.Left, Main.maxTilesX * 16f - box.Right,
+            box.Top, Main.maxTilesY * 16f - box.Bottom);
 
-        if (snapshot.WorldDistances.Left < 80f || snapshot.SolidDistances.Left < 32f)
+        if (world.Left < 80f || solid.Left < 32f)
         {
-            if (horizontal != Direction.Positive) { horizontal = Direction.Positive; hMagnitude = Magnitude.Small; reason = "left boundary"; }
+            if (horizontal < 0) { horizontal = 1; size = Magnitude.Small; reason = "left boundary"; }
         }
-        else if (snapshot.WorldDistances.Right < 80f || snapshot.SolidDistances.Right < 32f)
+        else if (world.Right < 80f || solid.Right < 32f)
         {
-            if (horizontal != Direction.Negative) { horizontal = Direction.Negative; hMagnitude = Magnitude.Small; reason = "right boundary"; }
-        }
-
-        if (snapshot.WorldDistances.Up < 64f || snapshot.SolidDistances.Up < 24f)
-        {
-            if (vertical == Direction.Negative) { vertical = Direction.None; vMagnitude = Magnitude.None; reason = "upper boundary"; }
-        }
-        if (snapshot.WorldDistances.Down < 64f || snapshot.SolidDistances.Down < 24f)
-        {
-            if (vertical == Direction.Positive) { vertical = Direction.None; vMagnitude = Magnitude.None; reason = "lower boundary"; }
+            if (horizontal > 0) { horizontal = -1; size = Magnitude.Small; reason = "right boundary"; }
         }
 
-        bool wantHook = (horizontal != Direction.None && hMagnitude == Magnitude.Large) ||
-                        (vertical == Direction.Negative && vMagnitude >= Magnitude.Medium);
+        if (world.Up < 64f || solid.Up < 24f)
+        {
+            if (vertical < 0) { vertical = 0; reason = "upper boundary"; }
+        }
+        if (world.Down < 64f || solid.Down < 24f)
+        {
+            if (vertical > 0) { vertical = 0; reason = "lower boundary"; }
+        }
+
+        bool moving = horizontal != 0 || vertical != 0;
+        if (!moving) size = Magnitude.None;
+        bool wantHook = moving && size == Magnitude.Large;
         if (_autoHookActive && (!wantHook ||
             Main.GameUpdateCount - _hookIssuedTick >= 45 ||
             player.grapCount > 0 && Vector2.Distance(player.Center, _hookTarget) < 48f))
@@ -58,44 +61,6 @@ public sealed class GameMovement : IMovementDriver
         }
         if (player.grapCount > 0 && !_autoHookActive && reason != "grapple released")
             return new ActionResult(intent, DodgeIntent.Idle, "manual grapple");
-
-        player.controlLeft = horizontal == Direction.Negative;
-        player.controlRight = horizontal == Direction.Positive;
-        player.controlUp = vertical == Direction.Negative;
-        player.controlDown = vertical == Direction.Positive;
-        bool canJump = !(_autoHookActive && player.grapCount > 0);
-        if (vertical == Direction.Negative && canJump)
-        {
-            if (vMagnitude >= Magnitude.Medium && !snapshot.HasHook && !snapshot.CanFly)
-            {
-                vMagnitude = Magnitude.Small;
-                reason = "no vertical ability";
-            }
-        }
-        bool useExtraJump = canJump && horizontal != Direction.None &&
-            hMagnitude == Magnitude.Medium && snapshot.CanDoubleJump &&
-            _jumpSequence != snapshot.Sequence;
-        if (horizontal != Direction.None && hMagnitude == Magnitude.Medium &&
-            !snapshot.CanDoubleJump)
-        {
-            hMagnitude = Magnitude.Small;
-            reason = "extra jump unavailable";
-        }
-
-        player.controlJump = ApplyJump(player, canJump && vertical == Direction.Negative,
-            useExtraJump, snapshot.Sequence);
-        if (vertical == Direction.Positive && vMagnitude == Magnitude.Small)
-        {
-            if (_dropSequence != snapshot.Sequence)
-            {
-                _dropSequence = snapshot.Sequence;
-                _dropStartY = player.Bottom.Y;
-                _dropTicks = 0;
-            }
-            _dropTicks++;
-            if (player.Bottom.Y >= _dropStartY + 16f || _dropTicks > 20)
-                player.controlDown = false;
-        }
 
         if (wantHook && !_autoHookActive && player.grapCount == 0 &&
             Main.GameUpdateCount >= _hookCooldownUntil && _hookSequence != snapshot.Sequence)
@@ -114,32 +79,82 @@ public sealed class GameMovement : IMovementDriver
             }
             else
             {
-                if (hMagnitude == Magnitude.Large) hMagnitude = snapshot.CanDoubleJump ? Magnitude.Medium : Magnitude.Small;
-                if (vMagnitude >= Magnitude.Medium) vMagnitude = Magnitude.Small;
+                size = vertical < 0 && snapshot.CanDoubleJump ? Magnitude.Medium : Magnitude.Small;
                 reason = "grapple unavailable";
             }
         }
         else player.controlHook = false;
-
-        if (vertical != Direction.None && vMagnitude == Magnitude.Large)
+        if (wantHook && !_autoHookActive && size == Magnitude.Large)
         {
-            vMagnitude = Magnitude.Medium;
-            reason = "mount outside first test";
+            size = vertical < 0 && snapshot.CanDoubleJump ? Magnitude.Medium : Magnitude.Small;
+            reason = "grapple unavailable";
         }
 
-        bool dash = intent.Dash && horizontal != Direction.None && snapshot.CanDash;
+        bool canJump = !(_autoHookActive && player.grapCount > 0);
+        if (vertical < 0 && size == Magnitude.Medium && !snapshot.CanDoubleJump)
+        {
+            size = Magnitude.Small;
+            reason = "extra jump unavailable";
+        }
+        player.controlLeft = horizontal < 0;
+        player.controlRight = horizontal > 0;
+        player.controlUp = vertical < 0;
+        player.controlDown = vertical > 0;
+        bool useExtraJump = canJump && vertical < 0 && size == Magnitude.Medium &&
+            snapshot.CanDoubleJump && _jumpSequence != snapshot.Sequence;
+        player.controlJump = ApplyJump(player, canJump && vertical < 0, useExtraJump, snapshot.Sequence);
+        if (vertical > 0 && size == Magnitude.Small)
+        {
+            if (_dropSequence != snapshot.Sequence)
+            {
+                _dropSequence = snapshot.Sequence;
+                _dropStartY = player.Bottom.Y;
+                _dropTicks = 0;
+            }
+            _dropTicks++;
+            if (player.Bottom.Y >= _dropStartY + 16f || _dropTicks > 20)
+                player.controlDown = false;
+        }
+
+        bool dash = intent.Dash && horizontal != 0 && snapshot.CanDash;
         if (dash && _dashSequence != snapshot.Sequence)
         {
             _dashSequence = snapshot.Sequence;
-            player.dashTime = horizontal == Direction.Positive ? 15 : -15;
-            if (horizontal == Direction.Positive) player.releaseRight = true;
+            player.dashTime = horizontal > 0 ? 15 : -15;
+            if (horizontal > 0) player.releaseRight = true;
             else player.releaseLeft = true;
         }
         else if (intent.Dash && !dash) reason = "dash unavailable";
 
-        var applied = new DodgeIntent(horizontal, vertical, hMagnitude, vMagnitude, dash);
+        var applied = new DodgeIntent(Compose(horizontal, vertical), moving ? size : Magnitude.None, dash);
         return new ActionResult(intent, applied, reason);
     }
+
+    private static (int Horizontal, int Vertical) Components(DodgeDirection direction) => direction switch
+    {
+        DodgeDirection.Up => (0, -1),
+        DodgeDirection.UpRight => (1, -1),
+        DodgeDirection.Right => (1, 0),
+        DodgeDirection.DownRight => (1, 1),
+        DodgeDirection.Down => (0, 1),
+        DodgeDirection.DownLeft => (-1, 1),
+        DodgeDirection.Left => (-1, 0),
+        DodgeDirection.UpLeft => (-1, -1),
+        _ => (0, 0)
+    };
+
+    private static DodgeDirection Compose(int horizontal, int vertical) => (horizontal, vertical) switch
+    {
+        (0, -1) => DodgeDirection.Up,
+        (1, -1) => DodgeDirection.UpRight,
+        (1, 0) => DodgeDirection.Right,
+        (1, 1) => DodgeDirection.DownRight,
+        (0, 1) => DodgeDirection.Down,
+        (-1, 1) => DodgeDirection.DownLeft,
+        (-1, 0) => DodgeDirection.Left,
+        (-1, -1) => DodgeDirection.UpLeft,
+        _ => DodgeDirection.Stay
+    };
 
     public void Release(Player player)
     {
@@ -175,13 +190,13 @@ public sealed class GameMovement : IMovementDriver
         return true;
     }
 
-    private static bool TryHookPoint(Player player, Direction horizontal,
-        Direction vertical, out Vector2 target)
+    private static bool TryHookPoint(Player player, int horizontal,
+        int vertical, out Vector2 target)
     {
         int cx = (int)(player.Center.X / 16f);
         int cy = (int)(player.Center.Y / 16f);
-        int dx = (int)horizontal;
-        int dy = (int)vertical;
+        int dx = horizontal;
+        int dy = vertical;
         if (dx == 0 && dy == 0) dy = -1;
 
         for (int step = 4; step <= 18; step++)

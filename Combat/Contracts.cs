@@ -4,18 +4,15 @@ using Terraria;
 
 namespace Jevaria.Combat;
 
-public enum Direction { Negative = -1, None = 0, Positive = 1 }
+public enum DodgeDirection { Up, UpRight, Right, DownRight, Down, DownLeft, Left, UpLeft, Stay }
 public enum Magnitude { None, Small, Medium, Large }
 
 public readonly record struct DodgeIntent(
-    Direction Horizontal, Direction Vertical,
-    Magnitude HorizontalMagnitude, Magnitude VerticalMagnitude, bool Dash)
+    DodgeDirection Direction, Magnitude Size, bool Dash)
 {
-    public static DodgeIntent Idle => new(Direction.None, Direction.None, Magnitude.None, Magnitude.None, false);
+    public static DodgeIntent Idle => new(DodgeDirection.Stay, Magnitude.None, false);
 
-    public bool Valid =>
-        (Horizontal == Direction.None) == (HorizontalMagnitude == Magnitude.None) &&
-        (Vertical == Direction.None) == (VerticalMagnitude == Magnitude.None);
+    public bool Valid => (Direction == DodgeDirection.Stay) == (Size == Magnitude.None);
 }
 
 public readonly record struct CombatEntity(
