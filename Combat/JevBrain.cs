@@ -117,12 +117,12 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
         };
         var questions = new Dictionary<string, object>
         {
-            ["direction"] = Choice("Choose one direction for the complete dodge route. Consider both eyes, projectiles, and the available room together.", DirectionCriteria(snapshot)),
-            ["magnitude"] = Choice("How much movement is needed to evade the current threats?", new Dictionary<string, string>
+            ["direction"] = Choice("Choose one direction for the complete dodge route. Consider every boss, projectile, and escape route. If near a ceiling, a safe descent restores room to dodge the next attack; moving sideways alone does not.", DirectionCriteria(snapshot)),
+            ["magnitude"] = Choice("Which movement tool is needed for the current threat? Movement continues until the next answer, so a long retreat does not require a larger size.", new Dictionary<string, string>
             {
-                ["small"] = "Ordinary movement, wings, or a short platform drop is enough",
-                ["medium"] = "Use an extra jump for an upward route; hold down for the full action for a downward route; sideways movement remains ordinary",
-                ["large"] = "A grappling hook along the route is useful and a suitable surface is reachable"
+                ["small"] = "Ordinary movement, wings, or a short platform drop is enough, even for a long retreat",
+                ["medium"] = "An extra jump is needed now for an upward dodge, or continuous down input is needed to descend across several platforms; sideways movement gains no extra speed",
+                ["large"] = "An imminent hit requires a grappling hook, and a solid anchor is reachable in the movement direction; otherwise it will fail"
             }),
             ["dash"] = new
             {
@@ -188,12 +188,16 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
         bool right = snapshot.WorldDistances.Right < 80f || snapshot.SolidDistances.Right < 32f;
         bool up = snapshot.WorldDistances.Up < 64f || snapshot.SolidDistances.Up < 24f;
         bool down = snapshot.WorldDistances.Down < 64f || snapshot.SolidDistances.Down < 24f;
+        bool nearCeiling = snapshot.SolidDistances.Up < 320f;
         string upText = up ? "up is blocked by a ceiling or world edge" :
-            snapshot.SolidDistances.Up < 64f ? "little room remains above" : "upward movement is available";
+            nearCeiling ? $"only {snapshot.SolidDistances.Up:0} pixels remain before a solid ceiling" : "upward movement is available";
         string downText = down ? "down is blocked by solid ground or the world edge" :
-            snapshot.PlatformDistanceBelow <= 8f ? "down passes through the platform directly underfoot" : "down passes through one-way platforms";
-        string leftText = left ? "left is blocked by a wall or world edge" : "leftward movement is available";
-        string rightText = right ? "right is blocked by a wall or world edge" : "rightward movement is available";
+            snapshot.PlatformDistanceBelow <= 8f ? "down passes through the platform directly underfoot" :
+            nearCeiling ? "down passes through platforms and restores vertical escape room" : "down passes through one-way platforms";
+        string leftText = left ? "left is blocked by a wall or world edge" :
+            nearCeiling ? "left is open but does not restore vertical escape room" : "leftward movement is available";
+        string rightText = right ? "right is blocked by a wall or world edge" :
+            nearCeiling ? "right is open but does not restore vertical escape room" : "rightward movement is available";
         return new Dictionary<string, string>
         {
             ["up"] = $"Move up to avoid threats; {upText}.",
