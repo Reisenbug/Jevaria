@@ -96,7 +96,8 @@ public sealed class GameSensor : ICombatSensor
                 player.width, player.height, 0), player.statLife,
             Entity(boss.whoAmI, BossName(boss), boss.Center, boss.velocity,
                 boss.width, boss.height, boss.damage), bosses, motion, parts, projectiles,
-            ScanSolids(box), world, player.dashType > 0 && player.dashDelay == 0,
+            ScanSolids(box), world, ScanPlatformBelow(box),
+            player.dashType > 0 && player.dashDelay == 0,
             player.AnyExtraJumpUsable(), player.wingTime > 0f,
             player.miscEquips[4].shoot != ProjectileID.None, hasMount,
             shotSpeed, shotType, player.HeldItem.Name, previous, previousDurationMs);
@@ -155,5 +156,23 @@ public sealed class GameSensor : ICombatSensor
         Tile tile = Main.tile[x, y];
         return tile.HasTile && !tile.IsActuated && Main.tileSolid[tile.TileType]
             && !Main.tileSolidTop[tile.TileType] && tile.Slope == 0 && !tile.IsHalfBlock;
+    }
+
+    private static float ScanPlatformBelow(Rectangle box)
+    {
+        int x0 = Math.Max(0, box.Left / 16);
+        int x1 = Math.Min(Main.maxTilesX - 1, (box.Right - 1) / 16);
+        int y0 = (box.Bottom - 1) / 16;
+        for (int step = 1; step <= 100 && y0 + step < Main.maxTilesY; step++)
+        {
+            int y = y0 + step;
+            for (int x = x0; x <= x1; x++)
+            {
+                Tile tile = Main.tile[x, y];
+                if (tile.HasTile && !tile.IsActuated && Main.tileSolidTop[tile.TileType])
+                    return y * 16f - box.Bottom;
+            }
+        }
+        return 1600f;
     }
 }

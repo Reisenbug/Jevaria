@@ -36,6 +36,7 @@ public sealed record CombatSnapshot(
     IReadOnlyList<CombatEntity> Parts,
     IReadOnlyList<CombatEntity> Projectiles,
     BoundaryDistances SolidDistances, BoundaryDistances WorldDistances,
+    float PlatformDistanceBelow,
     bool CanDash, bool CanDoubleJump, bool CanFly, bool HasHook,
     bool HasMount, float ShotSpeed, int ShotProjectileType, string WeaponName,
     DodgeIntent PreviousIntent, long PreviousDurationMs);

@@ -20,7 +20,11 @@ public sealed class JevariaConfig : ModConfig
     public string GeneralInstruction =
         "Fight the active boss. Avoid dangerous body contact and hostile projectiles, " +
         "considering every boss in `bosses` and the linked `parts`. Keep room to dodge " +
-        "and do not linger near solid or world boundaries. Positions are pixels and " +
+        "and do not linger near solid or world boundaries. If solid_distances.up " +
+        "is under 64 pixels, climbing has little room: descend when the route is safe " +
+        "instead of repeatedly pushing into the ceiling. platform_distance_below " +
+        "is the distance to the nearest one-way platform; moving down can pass " +
+        "through it. Positions are pixels and " +
         "velocities are pixels per game tick. Each action lasts until the next Jev answer, " +
         "usually about 300 ms. Choose direction and strength for each axis using the " +
         "available abilities. Request a dash only if available and useful now.";
@@ -88,6 +92,7 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
             projectiles = snapshot.Projectiles,
             solid_distances = snapshot.SolidDistances,
             world_distances = snapshot.WorldDistances,
+            platform_distance_below = snapshot.PlatformDistanceBelow,
             abilities = new
             {
                 snapshot.CanDash, snapshot.CanDoubleJump, snapshot.CanFly,
@@ -106,9 +111,13 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
             }),
             ["vertical"] = Choice("Which vertical direction should the player move now?", new
             {
-                up = "Move upward to avoid danger and keep room for the next action",
+                up = snapshot.SolidDistances.Up < 24f
+                    ? "Blocked by a solid ceiling; do not choose up"
+                    : "Move upward to avoid danger and keep room for the next action",
                 none = "No vertical movement is useful now",
-                down = "Move downward to avoid danger and keep room for the next action"
+                down = snapshot.SolidDistances.Up < 64f
+                    ? "Descend away from the ceiling if the path is safe; down passes through platforms"
+                    : "Move downward to avoid danger and keep room for the next action; down passes through platforms"
             }),
             ["horizontal_magnitude"] = Choice("If moving horizontally, how much movement is needed?", new
             {
