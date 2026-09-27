@@ -63,7 +63,8 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
             : new Dictionary<string, string> { [snapshot.Boss.Name] = string.IsNullOrWhiteSpace(config.GeneralInstruction)
                 ? JevariaConfig.DefaultGeneralInstruction : config.GeneralInstruction };
         var options = snapshot.AvailableActions.ToDictionary(option => ActionName(option.Intent));
-        var criteria = options.ToDictionary(pair => pair.Key, pair => ActionDescription(pair.Value));
+        var directions = snapshot.AvailableActions.GroupBy(option => option.Intent.Direction)
+            .ToDictionary(group => group.Key, group => group.ToArray());
         var state = new
         {
             hp_percent = snapshot.Health * 100 / Math.Max(1, snapshot.MaxHealth),
@@ -105,8 +106,16 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
         };
         var questions = new Dictionary<string, object>
         {
-            ["action"] = Choice("Choose one complete dodge action for the next reaction interval. Compare every boss body and projectile, their motion and damage, and room near solid and world boundaries. Frames until contact assumes current velocities remain constant. Prefer an action that leaves an escape route; sustained horizontal running at one height can let a pursuer catch up. A reachable grapple or mount may be needed for a sudden change in height or speed. Follow the boss notes. Every listed special tool is currently available. Continue the action until the next answer.", criteria)
+            ["direction"] = Choice("Choose the safest movement direction for the next reaction interval. Compare every boss body and projectile, their motion and damage, and room near solid and world boundaries. Frames until contact assumes current velocities remain constant. Preserve an escape route and vary height when a pursuer would catch sustained horizontal running. Follow the boss notes. All listed directions have at least one available action.",
+                directions.ToDictionary(group => group.Key.ToString(), group => DirectionDescription(group.Key)))
         };
+        foreach (var (route, candidates) in directions)
+        {
+            if (candidates.Length == 1) continue;
+            questions[$"tool_{route}"] = Choice(
+                $"Assume I move {route} for the next reaction interval. Which available movement tool is needed in that direction? Choose ordinary movement if it avoids the threat. A hook briefly latches, then jumps free after one or two frames. Slimy Saddle gives a strong vertical move but weak horizontal steering and can carry me into a boundary; use it only when ordinary movement or a hook cannot create enough safe separation.",
+                candidates.ToDictionary(option => ActionName(option.Intent), ActionDescription));
+        }
         string stateJson = JsonSerializer.Serialize(state);
         Terraria.ModLoader.ModContent.GetInstance<Jevaria>().Logger.Info(
             $"jev state #{snapshot.Sequence}: {stateJson}");
@@ -132,29 +141,41 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
         timer.Stop();
 
         JsonElement answers = body.RootElement.GetProperty("answers");
-        string chosenAction = ChoiceValue(answers, "action");
+        string chosenDirection = ChoiceValue(answers, "direction");
+        if (!Enum.TryParse(chosenDirection, out DodgeDirection direction) ||
+            !directions.TryGetValue(direction, out DodgeOption[]? actions))
+            throw new FormatException($"unknown direction: {chosenDirection}");
+        string chosenAction = actions.Length == 1 ? ActionName(actions[0].Intent) :
+            ChoiceValue(answers, $"tool_{direction}");
         if (!options.TryGetValue(chosenAction, out DodgeOption chosen))
             throw new FormatException($"unknown action: {chosenAction}");
 
         var probabilities = new Dictionary<string, IReadOnlyDictionary<string, float>>();
         var values = new Dictionary<string, float>();
+        if (actions.Length == 1) values[chosenAction] = 1f;
+        else foreach (JsonProperty value in answers.GetProperty($"tool_{direction}")
+            .GetProperty("probabilities").EnumerateObject())
+            values[value.Name] = value.Value.GetSingle();
         var horizontalProbabilities = new Dictionary<string, float>();
         var verticalProbabilities = new Dictionary<string, float>();
         var toolProbabilities = new Dictionary<string, float>();
-        foreach (JsonProperty value in answers.GetProperty("action").GetProperty("probabilities").EnumerateObject())
+        foreach (var (name, probability) in values)
         {
-            values[value.Name] = value.Value.GetSingle();
-            if (!options.TryGetValue(value.Name, out DodgeOption option)) continue;
+            if (!options.TryGetValue(name, out DodgeOption option)) continue;
             (int x, int y) = Components(option.Intent.Direction);
             string horizontal = x == 0 ? "None" : $"{(x < 0 ? "Left" : "Right")}{option.Intent.HorizontalSize}";
             string vertical = y == 0 ? "None" : $"{(y < 0 ? "Up" : "Down")}{option.Intent.VerticalSize}";
             bool mount = option.Intent.VerticalSize == Magnitude.Large;
             string tool = mount && option.HookDistanceCells is not null ? "HookAndMount" :
                 mount ? "Mount" : option.HookDistanceCells is not null ? "Hook" : "Ordinary";
-            AddProbability(horizontalProbabilities, horizontal, values[value.Name]);
-            AddProbability(verticalProbabilities, vertical, values[value.Name]);
-            AddProbability(toolProbabilities, tool, values[value.Name]);
+            AddProbability(horizontalProbabilities, horizontal, probability);
+            AddProbability(verticalProbabilities, vertical, probability);
+            AddProbability(toolProbabilities, tool, probability);
         }
+        var directionProbabilities = new Dictionary<string, float>();
+        foreach (JsonProperty value in answers.GetProperty("direction").GetProperty("probabilities").EnumerateObject())
+            directionProbabilities[value.Name] = value.Value.GetSingle();
+        probabilities["direction"] = directionProbabilities;
         probabilities["action"] = values;
         probabilities["horizontal"] = horizontalProbabilities;
         probabilities["vertical"] = verticalProbabilities;
@@ -177,6 +198,17 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
         return horizontal + vertical;
     }
 
+    private static string DirectionDescription(DodgeDirection direction)
+    {
+        if (direction == DodgeDirection.Stay)
+            return "Stay only if no approaching threat requires movement and I have room to escape later.";
+        (int x, int y) = Components(direction);
+        string horizontal = x == 0 ? "" : x < 0 ? "left" : "right";
+        string vertical = y == 0 ? "" : y < 0 ? "up" : "down";
+        return x == 0 ? $"Move {vertical}." : y == 0 ? $"Move {horizontal}." :
+            $"Move {vertical} and {horizontal}.";
+    }
+
     private static string ActionDescription(DodgeOption option)
     {
         DodgeIntent intent = option.Intent;
@@ -185,14 +217,14 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
         (int x, int y) = Components(intent.Direction);
         string horizontal = x == 0 ? "" : $"Move {(x < 0 ? "left" : "right")}. ";
         string hook = option.HookDistanceCells is float distance
-            ? $"Grapple toward a reachable surface {distance:0.#} cells away, then release. " : "";
+            ? $"Grapple toward a surface {distance:0.#} cells away, then jump free one or two frames after latching. " : "";
         string vertical = y switch
         {
             < 0 when intent.VerticalSize == Magnitude.Large =>
-                "Jump or use an extra jump while holding W, mount Slimy Saddle during the rise, then dismount at the apex. ",
+                "Jump while holding W and mount Slimy Saddle during the rise. It has poor horizontal steering and may hit a ceiling; dismount at the apex. ",
             < 0 => "Jump or use an extra jump while holding W. ",
             > 0 when intent.VerticalSize == Magnitude.Large =>
-                "Mount Slimy Saddle and hold S to descend, then dismount when the next action begins. ",
+                "Mount Slimy Saddle and hold S for a fast descent. It has poor horizontal steering; dismount when the next action begins. ",
             > 0 => "Hold S to descend or pass through a platform. ",
             _ => ""
         };
