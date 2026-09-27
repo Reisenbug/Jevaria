@@ -9,6 +9,12 @@ namespace Jevaria.Combat;
 public sealed class GameMovement : IMovementDriver
 {
     private const float MountEntrySpeed = 4f;
+    public static int EquippedVerticalMount(Player player) => player.miscEquips[3].type switch
+    {
+        ItemID.SlimySaddle => MountID.Slime,
+        ItemID.QueenSlimeMountSaddle => MountID.QueenSlime,
+        _ => MountID.None
+    };
     public const int HorizontalReserveCells = 35;
     public const int UpperReserveCells = 18;
     public const int LowerReserveCells = 4;
@@ -89,6 +95,7 @@ public sealed class GameMovement : IMovementDriver
     private ulong _hookCooldownUntil;
     private Vector2 _hookTarget;
     private bool _autoMountActive;
+    private int _autoMountType = MountID.None;
     private bool _autoMountForDown;
     private bool _mountRiseSeen;
     private bool _mountFallSeen;
@@ -122,20 +129,21 @@ public sealed class GameMovement : IMovementDriver
             if (vertical > 0) { vertical = 0; reason = "lower boundary"; }
         }
 
-        bool slimeEquipped = player.miscEquips[3].type == ItemID.SlimySaddle;
-        if (verticalSize == Magnitude.Large && !slimeEquipped)
+        int mountType = EquippedVerticalMount(player);
+        if (verticalSize == Magnitude.Large && mountType == MountID.None)
         {
             verticalSize = vertical < 0 ? Magnitude.Medium : Magnitude.Small;
-            reason = "slime mount unavailable";
+            reason = "vertical mount unavailable";
         }
-        bool upMount = slimeEquipped && vertical < 0 && verticalSize == Magnitude.Large;
-        bool downMount = slimeEquipped && vertical > 0 && verticalSize == Magnitude.Large;
+        bool upMount = mountType != MountID.None && vertical < 0 && verticalSize == Magnitude.Large;
+        bool downMount = mountType != MountID.None && vertical > 0 && verticalSize == Magnitude.Large;
         if (downMount && horizontalSize == Magnitude.Medium)
         {
             horizontalSize = Magnitude.Small;
             reason = "horizontal grapple unavailable while mounted";
         }
-        if (_autoMountActive && (!player.mount.Active || player.mount.Type != MountID.Slime))
+        if (_autoMountActive && (!player.mount.Active || player.mount.Type != _autoMountType ||
+            mountType != _autoMountType))
             DismountAuto(player);
         if (_autoMountActive && ((!upMount && !downMount) || upMount && _autoMountForDown ||
             downMount && !_autoMountForDown ||
@@ -144,7 +152,7 @@ public sealed class GameMovement : IMovementDriver
             !_mountRiseSeen && Main.GameUpdateCount - _mountStartTick > 6)))
         {
             DismountAuto(player);
-            reason = "slime dismount";
+            reason = "vertical mount dismount";
         }
 
         if (horizontal == 0) horizontalSize = Magnitude.None;
@@ -243,26 +251,26 @@ public sealed class GameMovement : IMovementDriver
         if (upMount && !_autoMountActive && _upMountSequence != snapshot.Sequence &&
             player.velocity.Y <= -MountEntrySpeed && !_autoHookActive && player.grapCount == 0)
         {
-            if (MountAuto(player, false))
+            if (MountAuto(player, mountType, false))
             {
                 _upMountSequence = snapshot.Sequence;
-                reason = "slime mount jump";
+                reason = "vertical mount jump";
             }
             else
             {
                 verticalSize = Magnitude.Small;
-                reason = "slime mount unavailable";
+                reason = "vertical mount unavailable";
             }
         }
         else if (upMount && !_autoMountActive && !_autoHookActive && reason.Length == 0)
-            reason = "slime waiting for upward speed";
+            reason = "vertical mount waiting for upward speed";
         if (downMount && !_autoMountActive && !_autoHookActive && player.grapCount == 0)
         {
-            if (MountAuto(player, true)) reason = "slime mount descent";
+            if (MountAuto(player, mountType, true)) reason = "vertical mount descent";
             else
             {
                 verticalSize = Magnitude.Small;
-                reason = "slime mount unavailable";
+                reason = "vertical mount unavailable";
             }
         }
         if (_autoMountActive && !_autoMountForDown && player.velocity.Y < -0.1f)
@@ -322,19 +330,20 @@ public sealed class GameMovement : IMovementDriver
         _hookCooldownUntil = Main.GameUpdateCount + 30;
     }
 
-    private bool MountAuto(Player player, bool down)
+    private bool MountAuto(Player player, int mountType, bool down)
     {
-        if (player.mount.Active || !player.mount.CanMount(MountID.Slime, player)) return false;
+        if (player.mount.Active || !player.mount.CanMount(mountType, player)) return false;
         float entrySpeed = player.velocity.Y;
-        player.mount.SetMount(MountID.Slime, player);
-        if (!player.mount.Active || player.mount.Type != MountID.Slime) return false;
+        player.mount.SetMount(mountType, player);
+        if (!player.mount.Active || player.mount.Type != mountType) return false;
         _autoMountActive = true;
+        _autoMountType = mountType;
         _autoMountForDown = down;
         _mountRiseSeen = false;
         _mountFallSeen = false;
         _mountStartTick = Main.GameUpdateCount;
         Terraria.ModLoader.ModContent.GetInstance<Jevaria>().Logger.Info(
-            $"slime mount: tick={Main.GameUpdateCount}; direction={(down ? "down" : "up")}; " +
+            $"vertical mount: type={mountType}; tick={Main.GameUpdateCount}; direction={(down ? "down" : "up")}; " +
             $"velocity_before={entrySpeed:0.00}; velocity_after={player.velocity.Y:0.00}");
         return true;
     }
@@ -342,9 +351,10 @@ public sealed class GameMovement : IMovementDriver
     private void DismountAuto(Player player)
     {
         if (!_autoMountActive) return;
-        if (player.mount.Active && player.mount.Type == MountID.Slime)
+        if (player.mount.Active && player.mount.Type == _autoMountType)
             player.mount.Dismount(player);
         _autoMountActive = false;
+        _autoMountType = MountID.None;
         _autoMountForDown = false;
         _mountRiseSeen = false;
         _mountFallSeen = false;

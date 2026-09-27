@@ -89,7 +89,8 @@ public sealed class GameSensor : ICombatSensor
         var world = new BoundaryDistances(box.Left, Main.maxTilesX * 16f - box.Right,
             box.Top, Main.maxTilesY * 16f - box.Bottom);
         BoundaryDistances solid = ScanSolids(box);
-        bool hasMount = player.miscEquips[3].type == ItemID.SlimySaddle;
+        int mountType = GameMovement.EquippedVerticalMount(player);
+        bool hasMount = mountType != MountID.None;
         bool hasHook = player.miscEquips[4].shoot != ProjectileID.None && Main.projHook[player.miscEquips[4].shoot];
         for (int slot = 0; slot < 58 && !hasHook; slot++)
         {
@@ -117,7 +118,7 @@ public sealed class GameSensor : ICombatSensor
             hasHook, hasMount,
             shotSpeed, shotType, player.HeldItem.Name,
             GameMovement.AvailableActions(player, solid, world, hasHook, hasMount),
-            previous, previousDurationMs);
+            previous, previousDurationMs) { MountType = mountType };
     }
 
     private static CombatEntity Entity(int id, string name, Vector2 center,

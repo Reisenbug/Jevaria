@@ -9,6 +9,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Xna.Framework;
+using Terraria.ID;
 using Terraria.ModLoader.Config;
 
 namespace Jevaria.Combat;
@@ -86,6 +87,11 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
                     twinRoutes[$"{routeDirection}Burst"] = new DodgeIntent(routeDirection,
                         x == 0 ? Magnitude.None : Magnitude.Small, Magnitude.Large, false);
             }
+        bool pillion = snapshot.MountType == MountID.QueenSlime;
+        string mountName = pillion ? "Gelatinous Pillion" : "Slimy Saddle";
+        string mountSteering = pillion
+            ? "It has faster horizontal steering and a short flight time"
+            : "It has poor horizontal steering";
         var state = new
         {
             hp_percent = snapshot.Health * 100 / Math.Max(1, snapshot.MaxHealth),
@@ -97,7 +103,7 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
                 can_double_jump = snapshot.CanDoubleJump,
                 can_fly = snapshot.CanFly,
                 has_hook = snapshot.HasHook,
-                has_slimy_saddle = snapshot.HasMount
+                vertical_mount = snapshot.HasMount ? mountName : "none"
             },
             threats = snapshot.Bosses.Concat(snapshot.Parts)
                 .GroupBy(entity => entity.Name)
@@ -135,7 +141,7 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
         var questions = new Dictionary<string, object>
         {
             ["direction"] = Choice(twins
-                ? "Choose a broad escape corridor from boss bodies and projectile lanes, with room to keep moving afterward. Favor a substantial vertical sweep over tiny repeated reversals; do not thread narrow gaps or automatically return toward the ceiling. Route descriptions give rough separation trends and projectile exposure, not exact collision predictions. Burst amplifies existing upward speed with Slimy Saddle, while downward Burst mounts immediately. Use the stronger move to clear danger quickly. Spazmatism enters phase two at 40 percent health: keep trending beyond 35 cells away and rapidly increase separation when closer."
+                ? $"Choose a broad escape corridor from boss bodies and projectile lanes, with room to keep moving afterward. Favor a substantial vertical sweep over tiny repeated reversals; do not thread narrow gaps or automatically return toward the ceiling. Route descriptions give rough separation trends and projectile exposure, not exact collision predictions. Burst amplifies existing upward speed with {mountName}, while downward Burst mounts immediately. Use the stronger move to clear danger quickly. Spazmatism enters phase two at 40 percent health: keep trending beyond 35 cells away and rapidly increase separation when closer."
                 : "Choose a broad route away from boss bodies and projectile lanes. Check each route's rough boss clearance trend and remaining room, including where I will be when this answer arrives. Do not move toward a nearby boss body or enter a wall or ceiling when another escape route exists. Preserve room to continue dodging after this interval. These projections are coarse and bosses may change speed.",
                 twins ? twinRoutes.ToDictionary(route => route.Key,
                     route => RouteDescription(route.Value.Direction, snapshot,
@@ -147,8 +153,9 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
         {
             if (candidates.Length == 1) continue;
             questions[$"tool_{route}"] = Choice(
-                $"Assume I move {route} for the next reaction interval. Choose a movement tool that clears the boss body and projectile lanes with room to keep escaping. Use ordinary movement when its displacement is enough; use a stronger vertical move when a slow route would remain inside the danger area. A hook briefly latches, then jumps free after one or two frames. Slimy Saddle gives fast vertical travel but weak horizontal steering, so check ceiling and floor room.",
-                candidates.ToDictionary(option => ActionName(option.Intent), ActionDescription));
+                $"Assume I move {route} for the next reaction interval. Choose a movement tool that clears the boss body and projectile lanes with room to keep escaping. Use ordinary movement when its displacement is enough; use a stronger vertical move when a slow route would remain inside the danger area. A hook briefly latches, then jumps free after one or two frames. {mountName} gives fast vertical travel. {mountSteering}, so check ceiling and floor room.",
+                candidates.ToDictionary(option => ActionName(option.Intent),
+                    option => ActionDescription(option, mountName, mountSteering)));
         }
         string stateJson = JsonSerializer.Serialize(state);
         Terraria.ModLoader.ModContent.GetInstance<Jevaria>().Logger.Info(
@@ -301,7 +308,8 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
             $"vertical {(y == 0 ? 0f : Math.Max(0f, verticalRoom)):0} cells.";
     }
 
-    private static string ActionDescription(DodgeOption option)
+    private static string ActionDescription(DodgeOption option, string mountName,
+        string mountSteering)
     {
         DodgeIntent intent = option.Intent;
         if (intent.Direction == DodgeDirection.Stay)
@@ -313,10 +321,10 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
         string vertical = y switch
         {
             < 0 when intent.VerticalSize == Magnitude.Large =>
-                "Jump while holding W and mount Slimy Saddle during the rise. It has poor horizontal steering and may hit a ceiling; dismount at the apex. ",
+                $"Jump while holding W and mount {mountName} during the rise. {mountSteering} and may hit a ceiling; dismount at the apex. ",
             < 0 => "Jump or use an extra jump while holding W. ",
             > 0 when intent.VerticalSize == Magnitude.Large =>
-                "Mount Slimy Saddle and hold S for a fast descent. It has poor horizontal steering; dismount when the next action begins. ",
+                $"Mount {mountName} and hold S for a fast descent. {mountSteering}; dismount when the descent ends. ",
             > 0 => "Hold S to descend or pass through a platform. ",
             _ => ""
         };

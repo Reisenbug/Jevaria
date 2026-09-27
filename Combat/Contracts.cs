@@ -52,6 +52,7 @@ public sealed record CombatSnapshot(
     DodgeIntent PreviousIntent, long PreviousDurationMs)
 {
     public VerticalLeg Leg { get; init; }
+    public int MountType { get; init; } = -1;
 }
 
 public sealed record DodgeDecision(
