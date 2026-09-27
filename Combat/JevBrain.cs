@@ -28,14 +28,16 @@ public sealed class JevariaConfig : ModConfig
     public const string DefaultInstruction =
         "Attack Spazmatism first, but dodge both eyes. Avoid body contact. " +
         "In phase one, move up and down while increasing distance from Spazmatism. " +
-        "Do not run horizontally toward it; stay more than 30 cells away when possible. " +
-        "Phase two begins when Spazmatism health_percent is at or below 50. " +
-        "Keep away from it throughout phase two. Leave its continuous fire stream immediately. " +
+        "Do not run horizontally toward it. " +
+        "Spazmatism enters phase two at 40 percent health. In phase two, keep trending " +
+        "toward more than 35 cells of separation; if closer, quickly move away. " +
+        "Leave its continuous fire stream immediately. " +
         "It then charges six times, aiming at my position when each charge starts. " +
         "Change both horizontal and vertical direction to dodge each fast charge; " +
         "do not keep running straight while it catches me. " +
         "Leave walls, the floor, the ceiling, and world edges early. " +
-        "Never let Spazmatism pin me against a boundary; gain vertical room before crossing past it.";
+        "Never let Spazmatism pin me against a boundary; gain vertical room before crossing past it. " +
+        "Never run straight toward Spazmatism.";
 
     public string GeneralInstruction = DefaultGeneralInstruction;
     public string Instruction = DefaultInstruction;
@@ -72,6 +74,18 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
                  snapshot.Leg.CanReverse)).ToDictionary(group => group.Key, group => group.Value);
             if (routes.Count > 0) directions = routes;
         }
+        var twinRoutes = new Dictionary<string, DodgeIntent>();
+        if (twins)
+            foreach (var (routeDirection, candidates) in directions)
+            {
+                (int x, int y) = Components(routeDirection);
+                twinRoutes[routeDirection.ToString()] = new DodgeIntent(routeDirection,
+                    x == 0 ? Magnitude.None : Magnitude.Small,
+                    y == 0 ? Magnitude.None : Magnitude.Small, false);
+                if (candidates.Any(candidate => candidate.Intent.VerticalSize == Magnitude.Large))
+                    twinRoutes[$"{routeDirection}Burst"] = new DodgeIntent(routeDirection,
+                        x == 0 ? Magnitude.None : Magnitude.Small, Magnitude.Large, false);
+            }
         var state = new
         {
             hp_percent = snapshot.Health * 100 / Math.Max(1, snapshot.MaxHealth),
@@ -121,10 +135,12 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
         var questions = new Dictionary<string, object>
         {
             ["direction"] = Choice(twins
-                ? "Choose a route that avoids both eyes and incoming fire. Keep traveling vertically toward the current leg target; reverse early only for an immediate collision or fire threat. Choose horizontal movement away from Spazmatism when possible. The listed routes show approximate displacement over 0.6 seconds, not exact physics."
+                ? "Choose a route and speed that avoids both eyes and incoming fire. Keep changing height, but do not automatically turn back toward the ceiling. Reverse a vertical leg when the other direction gives safer separation after a meaningful displacement. Burst uses Slimy Saddle for fast vertical travel; use it when ordinary travel is too slow to escape, not merely because it is available. Spazmatism enters phase two at 40 percent health: keep trending beyond 35 cells away and rapidly increase separation when closer. The listed displacements are approximate."
                 : "Choose the safest movement direction for the next reaction interval. Compare every boss body and projectile, their motion and damage, and room near solid and world boundaries. Frames until contact assumes current velocities remain constant. Preserve an escape route and vary height when a pursuer would catch sustained horizontal running. Follow the boss notes. All listed directions have at least one available action.",
-                directions.ToDictionary(group => group.Key.ToString(), group => twins
-                    ? RouteDescription(group.Key, snapshot) : DirectionDescription(group.Key)))
+                twins ? twinRoutes.ToDictionary(route => route.Key,
+                    route => RouteDescription(route.Value.Direction, snapshot,
+                        route.Value.VerticalSize == Magnitude.Large)) :
+                    directions.ToDictionary(group => group.Key.ToString(), group => DirectionDescription(group.Key)))
         };
         foreach (var (route, candidates) in twins ? new Dictionary<DodgeDirection, DodgeOption[]>() : directions)
         {
@@ -159,21 +175,20 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
 
         JsonElement answers = body.RootElement.GetProperty("answers");
         string chosenDirection = ChoiceValue(answers, "direction");
-        if (!Enum.TryParse(chosenDirection, out DodgeDirection direction) ||
-            !directions.TryGetValue(direction, out DodgeOption[]? actions))
-            throw new FormatException($"unknown direction: {chosenDirection}");
         if (twins)
         {
+            if (!twinRoutes.TryGetValue(chosenDirection, out DodgeIntent intent))
+                throw new FormatException($"unknown route: {chosenDirection}");
             var routeProbabilities = new Dictionary<string, float>();
             foreach (JsonProperty value in answers.GetProperty("direction").GetProperty("probabilities").EnumerateObject())
                 routeProbabilities[value.Name] = value.Value.GetSingle();
-            (int x, int y) = Components(direction);
-            var intent = new DodgeIntent(direction, x == 0 ? Magnitude.None : Magnitude.Small,
-                y == 0 ? Magnitude.None : Magnitude.Small, false);
             return new DodgeDecision(intent,
                 new Dictionary<string, IReadOnlyDictionary<string, float>> { ["direction"] = routeProbabilities },
                 timer.ElapsedMilliseconds, snapshot.Sequence);
         }
+        if (!Enum.TryParse(chosenDirection, out DodgeDirection direction) ||
+            !directions.TryGetValue(direction, out DodgeOption[]? actions))
+            throw new FormatException($"unknown direction: {chosenDirection}");
         string chosenAction = actions.Length == 1 ? ActionName(actions[0].Intent) :
             ChoiceValue(answers, $"tool_{direction}");
         if (!options.TryGetValue(chosenAction, out DodgeOption chosen))
@@ -238,16 +253,18 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
             $"Move {vertical} and {horizontal}.";
     }
 
-    private static string RouteDescription(DodgeDirection direction, CombatSnapshot snapshot)
+    private static string RouteDescription(DodgeDirection direction, CombatSnapshot snapshot, bool burst)
     {
         (int x, int y) = Components(direction);
         float horizontal = x == 0 ? 0f : 12f * x;
         float verticalRoom = y < 0
             ? Room(snapshot.SolidDistances.Up, snapshot.WorldDistances.Up) - GameMovement.UpperReserveCells
             : Room(snapshot.SolidDistances.Down, snapshot.WorldDistances.Down) - GameMovement.LowerReserveCells;
-        float vertical = y * Math.Max(0f, Math.Min(y < 0 ? 15f : 18f, verticalRoom));
+        float travelEstimate = burst ? (y < 0 ? 18f : 22f) : (y < 0 ? 10f : 18f);
+        float vertical = y * Math.Max(0f, Math.Min(travelEstimate, verticalRoom));
         return $"{DirectionDescription(direction)} Approximate displacement over 0.6 seconds: " +
             $"{horizontal:0} cells right, {vertical:0} cells down. " +
+            (burst ? "Fast vertical travel with Slimy Saddle. " : "Ordinary vertical travel. ") +
             (snapshot.Leg.Sign != 0 && y != snapshot.Leg.Sign
                 ? "This reverses the current vertical leg. "
                 : "This continues the current vertical leg. ") +

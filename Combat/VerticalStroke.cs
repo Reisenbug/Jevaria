@@ -7,7 +7,6 @@ namespace Jevaria.Combat;
 public sealed class VerticalStroke
 {
     private const float MinimumStrokeCells = 15f;
-    private const float MaximumStrokeCells = 50f;
     private int _sign;
     private float _startY;
     private float _targetY;
@@ -26,7 +25,8 @@ public sealed class VerticalStroke
         float remaining = Math.Max(0f, (_targetY - player.Center.Y) * _sign / 16f);
         float progress = Math.Max(0f, (player.Center.Y - _startY) * _sign / 16f);
         return new VerticalLeg(_sign, _targetY, remaining, progress,
-            progress >= MinimumStrokeCells || ImmediateThreat(snapshot));
+            progress >= MinimumStrokeCells || ImmediateThreat(snapshot) ||
+            _sign < 0 && player.velocity.Y > 0.5f && !snapshot.CanFly && !snapshot.CanDoubleJump);
     }
 
     public string Update(Player player, CombatSnapshot snapshot, int requestedSign)
@@ -40,7 +40,8 @@ public sealed class VerticalStroke
 
         bool blocked = GameMovement.Blocked(0, _sign, solid, world, player.velocity);
         bool reached = (player.Center.Y - _targetY) * _sign >= 0f;
-        _stalledFrames = (player.Center.Y - _lastY) * _sign < 0.5f
+        _stalledFrames = Math.Abs(player.velocity.Y) < 0.3f &&
+            (player.Center.Y - _lastY) * _sign < 0.5f
             ? _stalledFrames + 1 : 0;
         _lastY = player.Center.Y;
         if (blocked || reached || _stalledFrames >= 12)
@@ -64,8 +65,8 @@ public sealed class VerticalStroke
         Magnitude horizontalSize = horizontal == 0 ? Magnitude.None : Magnitude.Small;
         if (_sign == 0) return new DodgeIntent(Compose(horizontal, 0), horizontalSize,
             Magnitude.None, false);
-        float remaining = State(player, snapshot).RemainingCells;
-        Magnitude verticalSize = _sign < 0 && snapshot.HasMount && remaining >= MinimumStrokeCells
+        Magnitude verticalSize = chosen.VerticalSize == Magnitude.Large &&
+            Components(chosen.Direction).Y == _sign
             ? Magnitude.Large : Magnitude.Small;
         return new DodgeIntent(Compose(horizontal, _sign), horizontalSize, verticalSize, false);
     }
@@ -83,7 +84,7 @@ public sealed class VerticalStroke
         float available = _sign < 0 ? Math.Min(solid.Up, world.Up - GameSensor.WorldEdgeCells * 16f) :
             Math.Min(solid.Down, world.Down - GameSensor.WorldEdgeCells * 16f);
         float reserve = (_sign < 0 ? GameMovement.UpperReserveCells : GameMovement.LowerReserveCells) * 16f;
-        float travel = Math.Min(MaximumStrokeCells * 16f, Math.Max(0f, available - reserve));
+        float travel = Math.Max(0f, available - reserve);
         _startY = player.Center.Y;
         _lastY = _startY;
         _stalledFrames = 0;
@@ -112,8 +113,14 @@ public sealed class VerticalStroke
 
     private static (int X, int Y) Components(DodgeDirection direction) => direction switch
     {
-        DodgeDirection.UpLeft or DodgeDirection.DownLeft or DodgeDirection.Left => (-1, 0),
-        DodgeDirection.UpRight or DodgeDirection.DownRight or DodgeDirection.Right => (1, 0),
+        DodgeDirection.UpLeft => (-1, -1),
+        DodgeDirection.UpRight => (1, -1),
+        DodgeDirection.Up => (0, -1),
+        DodgeDirection.DownLeft => (-1, 1),
+        DodgeDirection.DownRight => (1, 1),
+        DodgeDirection.Down => (0, 1),
+        DodgeDirection.Left => (-1, 0),
+        DodgeDirection.Right => (1, 0),
         _ => (0, 0)
     };
 
