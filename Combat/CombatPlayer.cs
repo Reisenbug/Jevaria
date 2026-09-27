@@ -23,9 +23,9 @@ public sealed class CombatPlayer : ModPlayer
     private long _activeSince;
     private string _lastActionReason = "";
 
-    public bool Enabled { get; private set; }
+    public bool Enabled { get; private set; } = true;
     public bool ShowHud { get; set; } = true;
-    public string Status { get; private set; } = "off";
+    public string Status { get; private set; } = "waiting for boss";
     public DodgeDecision? Decision { get; private set; }
     public ActionResult LastAction { get; private set; }
     public Vector2? AimTarget { get; private set; }
@@ -60,6 +60,14 @@ public sealed class CombatPlayer : ModPlayer
     {
         if (Player.whoAmI != Main.myPlayer || !Enabled || Main.netMode != NetmodeID.SinglePlayer)
             return;
+
+        if (!Jevaria.Brain.Ready)
+        {
+            _movement.Release(Player);
+            _attack.Release(Player);
+            Status = "TypeSafe API key missing";
+            return;
+        }
 
         if (Player.dead || Main.gameMenu || Main.playerInventory)
         {
@@ -178,13 +186,13 @@ public sealed class CombatPlayer : ModPlayer
 
     public override void OnHurt(Player.HurtInfo info)
     {
-        if (Enabled)
+        if (Enabled && _snapshot != null)
             Mod.Logger.Info($"hurt: tick={Main.GameUpdateCount}; decision=#{Decision?.Sequence}; damage={info.Damage}; health={Player.statLife}; position={Player.Center}");
     }
 
     public override void OnHitNPCWithProj(Projectile proj, NPC target, NPC.HitInfo hit, int damageDone)
     {
-        if (Enabled && target.type is NPCID.Spazmatism or NPCID.Retinazer)
+        if (Enabled && _snapshot != null && target.type is NPCID.Spazmatism or NPCID.Retinazer)
             Mod.Logger.Info($"hit: tick={Main.GameUpdateCount}; decision=#{Decision?.Sequence}; target={target.FullName}; damage={damageDone}; target_health={target.life}; projectile={proj.Name}");
     }
 }
