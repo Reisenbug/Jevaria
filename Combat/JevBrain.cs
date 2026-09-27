@@ -65,6 +65,13 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
         var options = snapshot.AvailableActions.ToDictionary(option => ActionName(option.Intent));
         var directions = snapshot.AvailableActions.GroupBy(option => option.Intent.Direction)
             .ToDictionary(group => group.Key, group => group.ToArray());
+        if (twins)
+        {
+            var routes = directions.Where(group => Components(group.Key).Y != 0 &&
+                (snapshot.Leg.Sign == 0 || Components(group.Key).Y == snapshot.Leg.Sign ||
+                 snapshot.Leg.CanReverse)).ToDictionary(group => group.Key, group => group.Value);
+            if (routes.Count > 0) directions = routes;
+        }
         var state = new
         {
             hp_percent = snapshot.Health * 100 / Math.Max(1, snapshot.MaxHealth),
@@ -102,14 +109,24 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
                 above = Room(snapshot.SolidDistances.Up, snapshot.WorldDistances.Up),
                 below = Room(snapshot.SolidDistances.Down, snapshot.WorldDistances.Down)
             },
+            vertical_leg = twins ? new
+            {
+                direction = snapshot.Leg.Sign < 0 ? "up" : snapshot.Leg.Sign > 0 ? "down" : "uncommitted",
+                progress_cells = (int)snapshot.Leg.ProgressCells,
+                remaining_cells = (int)snapshot.Leg.RemainingCells,
+                can_reverse_for_threat = snapshot.Leg.CanReverse
+            } : null,
             boss_notes = bossNotes
         };
         var questions = new Dictionary<string, object>
         {
-            ["direction"] = Choice("Choose the safest movement direction for the next reaction interval. Compare every boss body and projectile, their motion and damage, and room near solid and world boundaries. Frames until contact assumes current velocities remain constant. Preserve an escape route and vary height when a pursuer would catch sustained horizontal running. Follow the boss notes. All listed directions have at least one available action.",
-                directions.ToDictionary(group => group.Key.ToString(), group => DirectionDescription(group.Key)))
+            ["direction"] = Choice(twins
+                ? "Choose a route that avoids both eyes and incoming fire. Keep traveling vertically toward the current leg target; reverse early only for an immediate collision or fire threat. Choose horizontal movement away from Spazmatism when possible. The listed routes show approximate displacement over 0.6 seconds, not exact physics."
+                : "Choose the safest movement direction for the next reaction interval. Compare every boss body and projectile, their motion and damage, and room near solid and world boundaries. Frames until contact assumes current velocities remain constant. Preserve an escape route and vary height when a pursuer would catch sustained horizontal running. Follow the boss notes. All listed directions have at least one available action.",
+                directions.ToDictionary(group => group.Key.ToString(), group => twins
+                    ? RouteDescription(group.Key, snapshot) : DirectionDescription(group.Key)))
         };
-        foreach (var (route, candidates) in directions)
+        foreach (var (route, candidates) in twins ? new Dictionary<DodgeDirection, DodgeOption[]>() : directions)
         {
             if (candidates.Length == 1) continue;
             questions[$"tool_{route}"] = Choice(
@@ -145,6 +162,18 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
         if (!Enum.TryParse(chosenDirection, out DodgeDirection direction) ||
             !directions.TryGetValue(direction, out DodgeOption[]? actions))
             throw new FormatException($"unknown direction: {chosenDirection}");
+        if (twins)
+        {
+            var routeProbabilities = new Dictionary<string, float>();
+            foreach (JsonProperty value in answers.GetProperty("direction").GetProperty("probabilities").EnumerateObject())
+                routeProbabilities[value.Name] = value.Value.GetSingle();
+            (int x, int y) = Components(direction);
+            var intent = new DodgeIntent(direction, x == 0 ? Magnitude.None : Magnitude.Small,
+                y == 0 ? Magnitude.None : Magnitude.Small, false);
+            return new DodgeDecision(intent,
+                new Dictionary<string, IReadOnlyDictionary<string, float>> { ["direction"] = routeProbabilities },
+                timer.ElapsedMilliseconds, snapshot.Sequence);
+        }
         string chosenAction = actions.Length == 1 ? ActionName(actions[0].Intent) :
             ChoiceValue(answers, $"tool_{direction}");
         if (!options.TryGetValue(chosenAction, out DodgeOption chosen))
@@ -207,6 +236,22 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
         string vertical = y == 0 ? "" : y < 0 ? "up" : "down";
         return x == 0 ? $"Move {vertical}." : y == 0 ? $"Move {horizontal}." :
             $"Move {vertical} and {horizontal}.";
+    }
+
+    private static string RouteDescription(DodgeDirection direction, CombatSnapshot snapshot)
+    {
+        (int x, int y) = Components(direction);
+        float horizontal = x == 0 ? 0f : 12f * x;
+        float verticalRoom = y < 0
+            ? Room(snapshot.SolidDistances.Up, snapshot.WorldDistances.Up) - GameMovement.UpperReserveCells
+            : Room(snapshot.SolidDistances.Down, snapshot.WorldDistances.Down) - GameMovement.LowerReserveCells;
+        float vertical = y * Math.Max(0f, Math.Min(y < 0 ? 15f : 18f, verticalRoom));
+        return $"{DirectionDescription(direction)} Approximate displacement over 0.6 seconds: " +
+            $"{horizontal:0} cells right, {vertical:0} cells down. " +
+            (snapshot.Leg.Sign != 0 && y != snapshot.Leg.Sign
+                ? "This reverses the current vertical leg. "
+                : "This continues the current vertical leg. ") +
+            $"Available vertical room before reserve: {Math.Max(0f, verticalRoom):0} cells.";
     }
 
     private static string ActionDescription(DodgeOption option)
