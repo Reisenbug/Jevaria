@@ -44,6 +44,7 @@ public sealed class CombatPlayer : ModPlayer
 
         Enabled = enabled;
         Status = enabled ? "waiting for boss" : "off";
+        Mod.Logger.Info($"combat {(enabled ? "enabled" : "disabled")}: tick={Main.GameUpdateCount}; health={Player.statLife}");
         if (enabled) return;
         _cancellation?.Cancel();
         _request = null;
@@ -78,6 +79,8 @@ public sealed class CombatPlayer : ModPlayer
                 Decision?.Intent ?? DodgeIntent.Idle, ActionAgeMs);
             if (_snapshot == null)
             {
+                if (Decision != null)
+                    Mod.Logger.Info($"combat ended: tick={Main.GameUpdateCount}; health={Player.statLife}");
                 Decision = null;
                 _movement.Release(Player);
                 _attack.Release(Player);
@@ -86,6 +89,7 @@ public sealed class CombatPlayer : ModPlayer
             }
             _cancellation?.Dispose();
             _cancellation = new CancellationTokenSource();
+            Mod.Logger.Info($"state #{_snapshot.Sequence}: {JsonSerializer.Serialize(_snapshot, new JsonSerializerOptions { IncludeFields = true })}");
             _request = Jevaria.Brain.DecideAsync(_snapshot, _cancellation.Token);
             Status = Decision == null ? "first decision pending" : "decision pending";
         }
@@ -151,7 +155,7 @@ public sealed class CombatPlayer : ModPlayer
         if (completed.IsFaulted)
         {
             Status = completed.Exception?.GetBaseException().Message ?? "Jev request failed";
-            Mod.Logger.Warn($"Jev request failed: {Status}");
+            Mod.Logger.Warn($"Jev request #{_snapshot?.Sequence} failed: {Status}");
             Decision = null;
             _nextRequestTick = Main.GameUpdateCount + 60;
             return;
@@ -164,11 +168,24 @@ public sealed class CombatPlayer : ModPlayer
             Decision = null;
             return;
         }
+        long previousAgeMs = ActionAgeMs;
         Decision = answer;
         _activeSince = Stopwatch.GetTimestamp();
         Status = "acting";
         Mod.Logger.Info($"decision #{answer.Sequence}: {answer.Intent}; " +
-            $"latency={answer.LatencyMs}ms; probabilities={JsonSerializer.Serialize(answer.Probabilities)}");
+            $"latency={answer.LatencyMs}ms; previous_action={previousAgeMs}ms; probabilities={JsonSerializer.Serialize(answer.Probabilities)}");
+    }
+
+    public override void OnHurt(Player.HurtInfo info)
+    {
+        if (Enabled)
+            Mod.Logger.Info($"hurt: tick={Main.GameUpdateCount}; decision=#{Decision?.Sequence}; damage={info.Damage}; health={Player.statLife}; position={Player.Center}");
+    }
+
+    public override void OnHitNPCWithProj(Projectile proj, NPC target, NPC.HitInfo hit, int damageDone)
+    {
+        if (Enabled && target.type is NPCID.Spazmatism or NPCID.Retinazer)
+            Mod.Logger.Info($"hit: tick={Main.GameUpdateCount}; decision=#{Decision?.Sequence}; target={target.FullName}; damage={damageDone}; target_health={target.life}; projectile={proj.Name}");
     }
 }
 
