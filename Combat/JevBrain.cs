@@ -32,8 +32,10 @@ public sealed class JevariaConfig : ModConfig
         "Do not run horizontally toward it. " +
         "Spazmatism enters phase two at 40 percent health. In phase two, pull away " +
         "horizontally from Spazmatism and aim to stay more than 35 cells away. " +
+        "If it closes inside 35 cells, escape decisively: use a mount-driven Large rise " +
+        "or descent, an extra jump, or a grapple when that route opens separation. " +
         "Use vertical movement to dodge a charge, fire, or another immediate threat, " +
-        "not as a constant up-down pattern. Large is useful when it actually clears danger. " +
+        "not as a constant up-down pattern. Do not choose Large automatically when safe. " +
         "Leave its continuous fire stream immediately. " +
         "It then charges six times, aiming at my position when each charge starts. " +
         "Change direction after a fast charge starts to dodge it; " +
@@ -62,9 +64,15 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
 
         JevariaConfig config = Terraria.ModLoader.ModContent.GetInstance<JevariaConfig>();
         bool twins = snapshot.Bosses.Any(boss => boss.Name is "Spazmatism" or "Retinazer");
+        bool spazmatismAlive = snapshot.Bosses.Any(boss => boss.Name == "Spazmatism");
+        string twinsInstruction = string.IsNullOrWhiteSpace(config.Instruction)
+            ? JevariaConfig.DefaultInstruction : config.Instruction;
         var bossNotes = twins
-            ? new Dictionary<string, string> { ["Spazmatism"] = string.IsNullOrWhiteSpace(config.Instruction)
-                ? JevariaConfig.DefaultInstruction : config.Instruction }
+            ? new Dictionary<string, string> { [spazmatismAlive ? "Spazmatism" : "Retinazer"] =
+                spazmatismAlive ? twinsInstruction :
+                "Spazmatism is defeated. Only Retinazer remains. Ignore all Spazmatism-specific " +
+                "advice below. Attack Retinazer and preserve room to evade its body charges. " +
+                twinsInstruction }
             : new Dictionary<string, string> { [snapshot.Boss.Name] = string.IsNullOrWhiteSpace(config.GeneralInstruction)
                 ? JevariaConfig.DefaultGeneralInstruction : config.GeneralInstruction };
         var options = snapshot.AvailableActions.ToDictionary(option => ActionName(option.Intent));
@@ -222,12 +230,13 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
         float travelEstimate = burst ? (y < 0 ? 18f : 22f) : (y < 0 ? 10f : 18f);
         float vertical = y * Math.Max(0f, Math.Min(travelEstimate, verticalRoom));
         Vector2 displacement = new(horizontal * 16f, vertical * 16f);
+        Vector2 playerAfter = snapshot.Player.Center + displacement;
         string bossClearance = string.Join("; ", snapshot.Bosses.Concat(snapshot.Parts)
             .Where(boss => Vector2.Distance(boss.Center, snapshot.Player.Center) < 70f * 16f)
             .Select(boss =>
             {
                 float current = Vector2.Distance(boss.Center, snapshot.Player.Center);
-                float after = Vector2.Distance(boss.Center, snapshot.Player.Center + displacement);
+                float after = Vector2.Distance(boss.Center + boss.Velocity * 36f, playerAfter);
                 return $"{boss.Name}: {(after - current > 5f * 16f ? "opens space" :
                     after - current < -5f * 16f ? "closes space" : "little separation change")}";
             }));
@@ -246,7 +255,7 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
             $"{horizontal:0} cells right, {vertical:0} cells down. " +
             (burst ? "Mount for faster vertical travel while holding W or S. " :
                 y == 0 ? "Ordinary horizontal travel. " : "Ordinary vertical travel. ") +
-            $"Boss clearance trend: {(bossClearance.Length == 0 ? "no nearby boss" : bossClearance)}. " +
+            $"Boss clearance trend if current motion continues: {(bossClearance.Length == 0 ? "no nearby boss" : bossClearance)}. " +
             $"Projectile corridor: {(exposed == 0 ? "clear" : exposed < 3 ? "exposed" : "crowded")}. " +
             $"Available room beyond reserve: horizontal {(x == 0 ? 0f : Math.Max(0f, horizontalRoom)):0}, " +
             $"vertical {(y == 0 ? 0f : Math.Max(0f, verticalRoom)):0} cells.";
