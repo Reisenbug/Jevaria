@@ -52,7 +52,7 @@ public sealed class GameMovement : IMovementDriver
             (0, Magnitude.None), (-1, Magnitude.Small), (-1, Magnitude.Medium),
             (-1, Magnitude.Large), (1, Magnitude.Small), (1, Magnitude.Large)
         };
-        var hookTargets = new Dictionary<(int X, int Y, bool NearHorizontal), float?>();
+        var hookTargets = new Dictionary<(int X, int Y, bool NearHorizontal), Vector2?>();
         foreach (var (x, horizontalSize) in horizontal)
         foreach (var (y, verticalSize) in vertical)
         {
@@ -63,23 +63,24 @@ public sealed class GameMovement : IMovementDriver
             bool upMount = y < 0 && verticalSize == Magnitude.Large;
             bool downMount = y > 0 && verticalSize == Magnitude.Large;
             if ((upMount || downMount) && !hasMount || downMount && horizontalHook) continue;
-            float? hookDistance = null;
+            Vector2? hookTarget = null;
             if (horizontalHook || verticalHook)
             {
                 var direction = (horizontalHook ? x : 0, verticalHook ? y : 0,
                     horizontalHook && !verticalHook);
-                if (!hookTargets.TryGetValue(direction, out hookDistance))
+                if (!hookTargets.TryGetValue(direction, out hookTarget))
                 {
                     if (hasHook && TryHookPoint(player, direction.Item1, direction.Item2,
                         direction.Item3, out Vector2 target))
-                        hookDistance = Vector2.Distance(player.Center, target) / 16f;
-                    hookTargets[direction] = hookDistance;
+                        hookTarget = target;
+                    hookTargets[direction] = hookTarget;
                 }
-                if (hookDistance is null && !upMount) continue;
-                if (hookDistance is null && horizontalHook) continue;
+                if (hookTarget is null && !upMount) continue;
+                if (hookTarget is null && horizontalHook) continue;
             }
             options.Add(new DodgeOption(new DodgeIntent(Compose(x, y), horizontalSize,
-                verticalSize, false), hookDistance));
+                verticalSize, false), hookTarget is Vector2 point
+                    ? Vector2.Distance(player.Center, point) / 16f : null, hookTarget));
         }
         return options;
     }
@@ -106,6 +107,9 @@ public sealed class GameMovement : IMovementDriver
     {
         if (!intent.Valid) return new ActionResult(intent, DodgeIntent.Idle, "invalid intent");
 
+        Vector2? plannedHook = null;
+        foreach (DodgeOption option in snapshot.AvailableActions)
+            if (option.Intent == intent) { plannedHook = option.HookTarget; break; }
         (int horizontal, int vertical) = Components(intent.Direction);
         Magnitude horizontalSize = intent.HorizontalSize;
         Magnitude verticalSize = intent.VerticalSize;
@@ -190,8 +194,9 @@ public sealed class GameMovement : IMovementDriver
             Main.GameUpdateCount >= _hookCooldownUntil && _hookSequence != snapshot.Sequence)
         {
             _hookSequence = snapshot.Sequence;
-            if (snapshot.HasHook && TryHookPoint(player, horizontalHook ? horizontal : 0,
-                verticalHook ? vertical : 0, horizontalHook && !verticalHook, out Vector2 hook))
+            if (snapshot.HasHook && TrySelectedHookPoint(player, plannedHook,
+                horizontalHook ? horizontal : 0, verticalHook ? vertical : 0,
+                horizontalHook && !verticalHook, out Vector2 hook))
             {
                 _autoHookActive = true;
                 _hookIssuedTick = Main.GameUpdateCount;
@@ -208,7 +213,7 @@ public sealed class GameMovement : IMovementDriver
             {
                 if (horizontalHook) horizontalSize = Magnitude.Small;
                 if (verticalSize >= Magnitude.Medium && !upMount) verticalSize = Magnitude.Small;
-                reason = "grapple unavailable";
+                reason = "grapple target lost";
             }
         }
         else if (_autoHookActive && player.grapCount == 0)
@@ -234,7 +239,9 @@ public sealed class GameMovement : IMovementDriver
         {
             if (horizontalHook) horizontalSize = Magnitude.Small;
             if (verticalSize >= Magnitude.Medium && !upMount) verticalSize = Magnitude.Small;
-            reason = "grapple unavailable";
+            reason = _hookSequence == snapshot.Sequence ? "grapple completed" :
+                Main.GameUpdateCount < _hookCooldownUntil ? "grapple cooling down" :
+                "grapple target lost";
         }
 
         bool canJump = !_autoHookActive || player.grapCount == 0;
@@ -325,7 +332,7 @@ public sealed class GameMovement : IMovementDriver
         _autoHookActive = false;
         _hookHeld = false;
         _hookLatchedTick = 0;
-        _hookCooldownUntil = Main.GameUpdateCount + 30;
+        _hookCooldownUntil = Main.GameUpdateCount + 2;
     }
 
     private bool MountAuto(Player player, int mountType, bool down)
@@ -407,6 +414,32 @@ public sealed class GameMovement : IMovementDriver
             }
         }
         return false;
+    }
+
+    private static bool TrySelectedHookPoint(Player player, Vector2? planned,
+        int horizontal, int vertical, bool nearHorizontal, out Vector2 target)
+    {
+        if (planned is Vector2 saved && ValidHookPoint(player, saved, horizontal, vertical))
+        {
+            target = saved;
+            return true;
+        }
+        return TryHookPoint(player, horizontal, vertical, nearHorizontal, out target);
+    }
+
+    private static bool ValidHookPoint(Player player, Vector2 target, int horizontal, int vertical)
+    {
+        Vector2 offset = target - player.Center;
+        float distance = offset.Length();
+        if (distance <= 6f * 16f || distance > HookRange(player) ||
+            horizontal != 0 && offset.X * horizontal <= 0f ||
+            vertical != 0 && offset.Y * vertical <= 0f) return false;
+        int x = (int)(target.X / 16f);
+        int y = (int)(target.Y / 16f);
+        if (!WorldGen.InWorld(x, y, 2)) return false;
+        Tile tile = Main.tile[x, y];
+        return tile.HasTile && !tile.IsActuated &&
+            (Main.tileSolid[tile.TileType] || tile.TileType == TileID.MinecartTrack);
     }
 
     private static float HookRange(Player player)
