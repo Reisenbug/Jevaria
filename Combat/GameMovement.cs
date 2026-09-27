@@ -9,6 +9,7 @@ public sealed class GameMovement : IMovementDriver
     private ulong _hookSequence;
     private ulong _mountSequence;
     private ulong _dashSequence;
+    private ulong _jumpSequence;
     private ulong _dropSequence;
     private float _dropStartY;
     private int _dropTicks;
@@ -58,12 +59,19 @@ public sealed class GameMovement : IMovementDriver
         }
         else if (horizontal != Direction.None && hMagnitude >= Magnitude.Medium)
         {
-            if (snapshot.CanDoubleJump) player.controlJump = true;
+            if (snapshot.CanDoubleJump)
+                player.controlJump = true;
             else if (hMagnitude == Magnitude.Medium)
             {
                 hMagnitude = Magnitude.Small;
                 reason = "extra jump unavailable";
             }
+        }
+        if (horizontal != Direction.None && hMagnitude >= Magnitude.Medium &&
+            snapshot.CanDoubleJump && _jumpSequence != snapshot.Sequence)
+        {
+            _jumpSequence = snapshot.Sequence;
+            player.releaseJump = true;
         }
         if (vertical == Direction.Positive && vMagnitude == Magnitude.Small)
         {
