@@ -10,18 +10,21 @@ public sealed class GameSensor : ICombatSensor
 {
     private readonly Dictionary<int, Queue<(ulong Tick, float Speed)>> _speedHistory = new();
 
-    public void Observe(Player player)
+    public bool Observe(Player player)
     {
         ulong now = Main.GameUpdateCount;
+        bool bossPresent = false;
         foreach (NPC npc in Main.npc)
         {
-            if (!npc.active || !IsTwin(npc)) continue;
+            if (!npc.active || !npc.boss) continue;
+            bossPresent = true;
             if (!_speedHistory.TryGetValue(npc.whoAmI, out var history))
                 _speedHistory[npc.whoAmI] = history = new Queue<(ulong, float)>();
             history.Enqueue((now, npc.velocity.Length() * 60f / 16f));
             while (history.Count > 0 && now - history.Peek().Tick > 60)
                 history.Dequeue();
         }
+        return bossPresent;
     }
 
     public CombatSnapshot? Capture(Player player, ulong sequence, DodgeIntent previous, long previousDurationMs)
@@ -31,7 +34,7 @@ public sealed class GameSensor : ICombatSensor
         float closest = float.MaxValue;
         foreach (NPC npc in Main.npc)
         {
-            if (!npc.active || !IsTwin(npc)) continue;
+            if (!npc.active || !npc.boss) continue;
             activeBosses.Add(npc);
             if (npc.type == NPCID.Spazmatism) boss = npc;
             float distance = Vector2.DistanceSquared(player.Center, npc.Center);
@@ -48,7 +51,7 @@ public sealed class GameSensor : ICombatSensor
         foreach (NPC npc in activeBosses)
         {
             bossIds.Add(npc.whoAmI);
-            bosses.Add(Entity(npc.whoAmI, TwinName(npc), npc.Center, npc.velocity,
+            bosses.Add(Entity(npc.whoAmI, BossName(npc), npc.Center, npc.velocity,
                 npc.width, npc.height, npc.damage));
             float speed = npc.velocity.Length() * 60f / 16f;
             float fastest = speed;
@@ -59,7 +62,7 @@ public sealed class GameSensor : ICombatSensor
         var parts = new List<CombatEntity>();
         foreach (NPC npc in Main.npc)
         {
-            if (!npc.active || npc.friendly || npc.whoAmI == boss.whoAmI) continue;
+            if (!npc.active || npc.friendly || bossIds.Contains(npc.whoAmI)) continue;
             if (bossIds.Contains(npc.realLife))
                 parts.Add(Entity(npc.whoAmI, npc.FullName, npc.Center, npc.velocity,
                     npc.width, npc.height, npc.damage));
@@ -91,7 +94,7 @@ public sealed class GameSensor : ICombatSensor
         return new CombatSnapshot(sequence, Main.GameUpdateCount,
             Entity(player.whoAmI, player.name, player.Center, player.velocity,
                 player.width, player.height, 0), player.statLife,
-            Entity(boss.whoAmI, TwinName(boss), boss.Center, boss.velocity,
+            Entity(boss.whoAmI, BossName(boss), boss.Center, boss.velocity,
                 boss.width, boss.height, boss.damage), bosses, motion, parts, projectiles,
             ScanSolids(box), world, player.dashType > 0 && player.dashDelay == 0,
             player.AnyExtraJumpUsable(), player.wingTime > 0f,
@@ -103,11 +106,12 @@ public sealed class GameSensor : ICombatSensor
         Vector2 velocity, int width, int height, int damage)
         => new(id, name, center, velocity, new Vector2(width, height), damage);
 
-    private static bool IsTwin(NPC npc)
-        => npc.type is NPCID.Spazmatism or NPCID.Retinazer;
-
-    private static string TwinName(NPC npc)
-        => npc.type == NPCID.Spazmatism ? "Spazmatism" : "Retinazer";
+    private static string BossName(NPC npc) => npc.type switch
+    {
+        NPCID.Spazmatism => "Spazmatism",
+        NPCID.Retinazer => "Retinazer",
+        _ => npc.FullName
+    };
 
     private static BoundaryDistances ScanSolids(Rectangle box)
     {

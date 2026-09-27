@@ -57,6 +57,7 @@ public sealed class CombatPlayer : ModPlayer
         _activeSince = 0;
         _movement.Release(Player);
         _attack.Release(Player);
+        _attack.RestoreWeapon(Player);
     }
 
     public void SetDodgeEnabled(bool enabled)
@@ -106,7 +107,14 @@ public sealed class CombatPlayer : ModPlayer
             Player.controlDown || Player.controlJump || Player.controlHook ||
             Player.controlUseItem || Player.controlUseTile || Player.controlMount;
 
-        _sensor.Observe(Player);
+        bool bossPresent = _sensor.Observe(Player);
+        if (bossPresent)
+        {
+            int? slot = _attack.SelectFirstWeapon(Player);
+            if (slot is { } selected)
+                Mod.Logger.Info($"weapon selected: slot={selected + 1}; item={Player.HeldItem.Name}");
+        }
+        else _attack.RestoreWeapon(Player);
 
         if (DodgeEnabled && _request?.IsCompleted == true) ReceiveDecision();
 
@@ -249,7 +257,7 @@ public sealed class CombatPlayer : ModPlayer
 
     public override void OnHitNPCWithProj(Projectile proj, NPC target, NPC.HitInfo hit, int damageDone)
     {
-        if (Enabled && _snapshot != null && target.type is NPCID.Spazmatism or NPCID.Retinazer)
+        if (Enabled && _snapshot != null && target.boss)
             Mod.Logger.Info($"hit: tick={Main.GameUpdateCount}; decision=#{Decision?.Sequence}; target={target.FullName}; damage={damageDone}; target_health={target.life}; projectile={proj.Name}");
     }
 }

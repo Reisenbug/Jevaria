@@ -6,6 +6,41 @@ namespace Jevaria.Combat;
 
 public sealed class ProjectileAim : IAttackDriver
 {
+    private bool _weaponSelected;
+    private int _previousSlot = -1;
+    private int _autoSlot = -1;
+
+    public int? SelectFirstWeapon(Player player)
+    {
+        if (_weaponSelected)
+        {
+            if (_autoSlot >= 0 && player.selectedItem != _autoSlot)
+                _autoSlot = -1;
+            return null;
+        }
+
+        for (int slot = 0; slot < 10; slot++)
+        {
+            Item item = player.inventory[slot];
+            if (item.IsAir || item.damage <= 0 || item.useStyle == ItemUseStyleID.None ||
+                item.pick != 0 || item.axe != 0 || item.hammer != 0) continue;
+            _weaponSelected = true;
+            _previousSlot = player.selectedItem;
+            _autoSlot = slot;
+            player.selectedItem = slot;
+            return slot;
+        }
+        return null;
+    }
+
+    public void RestoreWeapon(Player player)
+    {
+        if (_autoSlot >= 0 && player.selectedItem == _autoSlot && _previousSlot >= 0)
+            player.selectedItem = _previousSlot;
+        _weaponSelected = false;
+        _previousSlot = _autoSlot = -1;
+    }
+
     public bool TryAttack(Player player, CombatSnapshot snapshot, out Vector2 target)
     {
         target = snapshot.Boss.Center;

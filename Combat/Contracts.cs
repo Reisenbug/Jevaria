@@ -48,7 +48,7 @@ public readonly record struct ActionResult(DodgeIntent Requested, DodgeIntent Ap
 
 public interface ICombatSensor
 {
-    void Observe(Player player);
+    bool Observe(Player player);
     CombatSnapshot? Capture(Player player, ulong sequence, DodgeIntent previous, long previousDurationMs);
 }
 
@@ -60,6 +60,8 @@ public interface IMovementDriver
 
 public interface IAttackDriver
 {
+    int? SelectFirstWeapon(Player player);
+    void RestoreWeapon(Player player);
     bool TryAttack(Player player, CombatSnapshot snapshot, out Vector2 target);
     void Release(Player player);
 }

@@ -17,9 +17,18 @@ public sealed class JevariaConfig : ModConfig
 
     public string ApiKey = "";
 
+    public string GeneralInstruction =
+        "Fight the active boss. Avoid dangerous body contact and hostile projectiles, " +
+        "considering every boss in `bosses` and the linked `parts`. Keep room to dodge " +
+        "and do not linger near solid or world boundaries. Positions are pixels and " +
+        "velocities are pixels per game tick. Each action lasts until the next Jev answer, " +
+        "usually about 300 ms. Choose direction and strength for each axis using the " +
+        "available abilities. Request a dash only if available and useful now.";
+
     public string Instruction =
-        "Begin when the Twins appear. The Twins are two independently flying eyes. Focus damage " +
-        "on Spazmatism, the green fire eye, but dodge both eyes. Avoid body contact first. " +
+        "The Twins are two independently flying eyes. Focus damage " +
+        "on Spazmatism, the green fire eye, while it is alive. Dodge both surviving eyes. " +
+        "Avoid body contact first. " +
         "In phase one Spazmatism retreats when approached and follows when the player retreats, " +
         "so chasing it horizontally does not reliably control distance and can run into its " +
         "shots. Within 30 tiles (480 pixels) of Spazmatism is dangerous: its fire can reach " +
@@ -39,13 +48,10 @@ public sealed class JevariaConfig : ModConfig
         "recent maximum alone is not a charge. Spazmatism's projectiles can add debuffs, so " +
         "their cost exceeds their listed damage. Retinazer's main danger is collision, not " +
         "its lasers; do not make a dangerous move just to avoid a weak laser. Both bodies " +
-        "can collide with the player. `bosses` contains both active eyes, while `boss` is " +
+        "can collide with the player. `bosses` contains the surviving eyes, while `boss` is " +
         "the attack target. Avoid fleeing from one eye into the other; seek a direction clear " +
-        "of both. When caught between them, move away from Spazmatism first. Avoid lingering " +
-        "near solid or world boundaries. Positions are pixels and velocities are pixels per " +
-        "game tick. Each action lasts until the next Jev answer, usually about 300 ms. " +
-        "The first test has wings, an extra jump, and a grapple, but no mount. Choose " +
-        "direction and strength for each axis. Request a dash only if available and timely.";
+        "of both. When caught between them, move away from Spazmatism first. The first test " +
+        "has wings, an extra jump, and a grapple, but no mount.";
 }
 
 public sealed class JevBrain : IDodgeBrain, IDisposable
@@ -62,7 +68,14 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
         string? key = Key;
         if (string.IsNullOrWhiteSpace(key)) throw new InvalidOperationException("TYPESAFE_API_KEY is missing");
 
-        string instruction = Terraria.ModLoader.ModContent.GetInstance<JevariaConfig>().Instruction;
+        JevariaConfig config = Terraria.ModLoader.ModContent.GetInstance<JevariaConfig>();
+        string instruction = config.GeneralInstruction;
+        foreach (CombatEntity boss in snapshot.Bosses)
+        {
+            if (boss.Name is not ("Spazmatism" or "Retinazer")) continue;
+            instruction += " " + config.Instruction;
+            break;
+        }
         var state = new
         {
             instruction,
