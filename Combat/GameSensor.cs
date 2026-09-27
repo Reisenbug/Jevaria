@@ -16,8 +16,8 @@ public sealed class GameSensor : ICombatSensor
         bool bossPresent = false;
         foreach (NPC npc in Main.npc)
         {
-            if (!npc.active || !npc.boss) continue;
-            bossPresent = true;
+            if (!npc.active || !npc.boss && !BossPart(npc.type)) continue;
+            if (npc.boss) bossPresent = true;
             if (!_speedHistory.TryGetValue(npc.whoAmI, out var history))
                 _speedHistory[npc.whoAmI] = history = new Queue<(ulong, float)>();
             history.Enqueue((now, (Math.Abs(npc.velocity.X) + Math.Abs(npc.velocity.Y)) * 60f / 16f));
@@ -63,16 +63,22 @@ public sealed class GameSensor : ICombatSensor
         foreach (NPC npc in Main.npc)
         {
             if (!npc.active || npc.friendly || bossIds.Contains(npc.whoAmI)) continue;
-            if (bossIds.Contains(npc.realLife))
+            if (bossIds.Contains(npc.realLife) || BossPart(npc.type))
+            {
                 parts.Add(Entity(npc.whoAmI, npc.FullName, npc.Center, npc.velocity,
                     npc.width, npc.height, npc.damage));
+                float speed = (Math.Abs(npc.velocity.X) + Math.Abs(npc.velocity.Y)) * 60f / 16f;
+                float fastest = speed;
+                if (_speedHistory.TryGetValue(npc.whoAmI, out var history))
+                    foreach (var sample in history) fastest = Math.Max(fastest, sample.Speed);
+                motion.Add(new BossMotion(npc.whoAmI, speed, fastest, npc.life, npc.lifeMax));
+            }
         }
 
         var projectiles = new List<CombatEntity>();
         foreach (Projectile projectile in Main.projectile)
         {
             if (!projectile.active || !projectile.hostile || projectile.damage <= 0) continue;
-            if (Vector2.DistanceSquared(player.Center, projectile.Center) > 1600f * 1600f) continue;
             projectiles.Add(Entity(projectile.whoAmI, projectile.Name, projectile.Center,
                 projectile.velocity * (projectile.extraUpdates + 1), projectile.width,
                 projectile.height, projectile.damage));
@@ -114,6 +120,13 @@ public sealed class GameSensor : ICombatSensor
         NPCID.Retinazer => "Retinazer",
         _ => npc.FullName
     };
+
+    private static bool BossPart(int type) => type is
+        NPCID.SkeletronHand or NPCID.EaterofWorldsHead or NPCID.EaterofWorldsBody or
+        NPCID.EaterofWorldsTail or NPCID.WallofFleshEye or NPCID.TheHungry or
+        NPCID.TheHungryII or NPCID.PlanterasTentacle or NPCID.PlanterasHook or
+        NPCID.PrimeCannon or NPCID.PrimeSaw or NPCID.PrimeVice or NPCID.PrimeLaser or
+        NPCID.TheDestroyerBody or NPCID.TheDestroyerTail or NPCID.Probe;
 
     public static BoundaryDistances ScanSolids(Rectangle box)
     {

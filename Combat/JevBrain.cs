@@ -88,11 +88,17 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
             threats = snapshot.Bosses.Concat(snapshot.Parts)
                 .GroupBy(entity => entity.Name)
                 .Select(group => group.OrderBy(entity => Vector2.DistanceSquared(entity.Center, snapshot.Player.Center)).First())
-                .Where(entity => Vector2.Distance(entity.Center, snapshot.Player.Center) <= 200f * 16f)
+                .Where(entity => (Math.Abs(entity.Center.X - snapshot.Player.Center.X) +
+                    Math.Abs(entity.Center.Y - snapshot.Player.Center.Y)) / 16f <= 200f)
                 .Select(entity => BossThreat(entity, snapshot)).ToArray(),
             incoming_projectiles = snapshot.Projectiles
                 .Select(entity => (Entity: entity, Frames: FramesUntilContact(entity, snapshot.Player)))
-                .Where(item => item.Frames >= 0 || Vector2.DistanceSquared(item.Entity.Center, snapshot.Player.Center) <= 96f * 96f)
+                .Where(item => item.Frames >= 0 || Vector2.DistanceSquared(item.Entity.Center, snapshot.Player.Center) <= 30f * 30f * 16f * 16f)
+                .Where(item => item.Frames == 0 || Vector2.DistanceSquared(item.Entity.Center, snapshot.Player.Center) <= 96f * 96f ||
+                    (item.Entity.Center.X < snapshot.Player.Center.X && item.Entity.Velocity.X > 0.1f) ||
+                    (item.Entity.Center.X > snapshot.Player.Center.X && item.Entity.Velocity.X < -0.1f) ||
+                    (item.Entity.Center.Y < snapshot.Player.Center.Y && item.Entity.Velocity.Y > 0.1f) ||
+                    (item.Entity.Center.Y > snapshot.Player.Center.Y && item.Entity.Velocity.Y < -0.1f))
                 .OrderBy(item => item.Frames < 0 ? int.MaxValue : item.Frames)
                 .Take(12)
                 .Select(item => ProjectileThreat(item.Entity, snapshot)).ToArray(),
