@@ -38,7 +38,7 @@ public sealed class CombatPlayer : ModPlayer
         if (enabled && (Main.netMode != NetmodeID.SinglePlayer || !Jevaria.Brain.Ready))
         {
             Status = Main.netMode != NetmodeID.SinglePlayer
-                ? "single player only" : "TYPESAFE_API_KEY missing";
+                ? "single player only" : "TypeSafe API key missing";
             return;
         }
 

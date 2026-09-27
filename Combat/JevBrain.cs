@@ -15,6 +15,8 @@ public sealed class JevariaConfig : ModConfig
 {
     public override ConfigScope Mode => ConfigScope.ClientSide;
 
+    public string ApiKey = "";
+
     public string Instruction =
         "You control dodging in a Terraria boss fight. Choose movement that avoids imminent " +
         "high-damage contacts and projectiles while preserving room to move. Avoid lingering " +
@@ -29,11 +31,14 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
 {
     private readonly HttpClient _client = new() { Timeout = TimeSpan.FromMilliseconds(1500) };
 
-    public bool Ready => !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("TYPESAFE_API_KEY"));
+    private static string? Key => Environment.GetEnvironmentVariable("TYPESAFE_API_KEY") is { Length: > 0 } key
+        ? key : Terraria.ModLoader.ModContent.GetInstance<JevariaConfig>().ApiKey;
+
+    public bool Ready => !string.IsNullOrWhiteSpace(Key);
 
     public async Task<DodgeDecision> DecideAsync(CombatSnapshot snapshot, CancellationToken cancellationToken)
     {
-        string? key = Environment.GetEnvironmentVariable("TYPESAFE_API_KEY");
+        string? key = Key;
         if (string.IsNullOrWhiteSpace(key)) throw new InvalidOperationException("TYPESAFE_API_KEY is missing");
 
         string instruction = Terraria.ModLoader.ModContent.GetInstance<JevariaConfig>().Instruction;

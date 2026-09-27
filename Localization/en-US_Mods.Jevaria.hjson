@@ -1,5 +1,9 @@
 Configs: {
 	JevariaConfig: {
+		ApiKey: {
+			Tooltip: "TypeSafe API key; alternatively set TYPESAFE_API_KEY in the game process environment"
+			Label: TypeSafe API key
+		}
 		Instruction: {
 			Tooltip: "Instruction sent with every boss combat state"
 			Label: Dodge instruction

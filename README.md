@@ -5,7 +5,7 @@ Jev 驱动的 Terraria Boss 战实验模组。Jev 每次选择水平/垂直躲�
 ## 运行
 
 1. 使用 tModLoader 2026.07 构建并启用 `Jevaria`。
-2. 在启动 tModLoader 的进程环境中设置 `TYPESAFE_API_KEY`。密钥不会写入仓库或模组配置。
+2. 在客户端模组配置中填入 TypeSafe API key，或在启动 tModLoader 的进程环境中设置 `TYPESAFE_API_KEY`。环境变量优先；模组配置保存在本机的 tModLoader `ModConfigs` 目录，不写入仓库。
 3. 进入单人世界，装备直线弹道的远程武器。在 Boss 出现后输入 `/jevaria on`。
 4. 输入 `/jevaria off` 停止自动操作；`/jevaria hud` 开关游戏内决策显示。
 
