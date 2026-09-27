@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -16,7 +17,6 @@ public sealed class CombatPlayer : ModPlayer
     private readonly ICombatSensor _sensor = new GameSensor();
     private readonly IMovementDriver _movement = new GameMovement();
     private readonly IAttackDriver _attack = new ProjectileAim();
-    private readonly VerticalStroke _stroke = new();
     private CancellationTokenSource? _cancellation;
     private Task<DodgeDecision>? _request;
     private CombatSnapshot? _snapshot;
@@ -61,7 +61,6 @@ public sealed class CombatPlayer : ModPlayer
         _activeSince = 0;
         _lastCompletedIntent = DodgeIntent.Idle;
         _lastCompletedDurationMs = 0;
-        _stroke.Reset();
         _movement.Release(Player);
         _attack.Release(Player);
         _attack.RestoreWeapon(Player);
@@ -76,7 +75,6 @@ public sealed class CombatPlayer : ModPlayer
         _activeSince = 0;
         _lastCompletedIntent = DodgeIntent.Idle;
         _lastCompletedDurationMs = 0;
-        _stroke.Reset();
         _nextRequestTick = Main.GameUpdateCount;
         _lastActionReason = "";
         _movement.Release(Player);
@@ -99,7 +97,6 @@ public sealed class CombatPlayer : ModPlayer
 
         if (!Jevaria.Brain.Ready)
         {
-            _stroke.Reset();
             _movement.Release(Player);
             _attack.Release(Player);
             Status = "TypeSafe API key missing";
@@ -108,7 +105,6 @@ public sealed class CombatPlayer : ModPlayer
 
         if (Player.dead || Main.gameMenu || Main.playerInventory)
         {
-            _stroke.Reset();
             _movement.Release(Player);
             _attack.Release(Player);
             Status = "paused";
@@ -117,7 +113,6 @@ public sealed class CombatPlayer : ModPlayer
 
         bool manualMovementInput = Player.controlLeft || Player.controlRight || Player.controlUp ||
             Player.controlDown || Player.controlJump || Player.controlHook || Player.controlMount;
-        if (manualMovementInput) _stroke.Reset();
 
         bool bossPresent = _sensor.Observe(Player);
         if (bossPresent)
@@ -144,7 +139,6 @@ public sealed class CombatPlayer : ModPlayer
                 _lastCompletedIntent, _lastCompletedDurationMs);
             if (_snapshot == null)
             {
-                _stroke.Reset();
                 if (Decision != null)
                     Mod.Logger.Info($"combat ended: tick={Main.GameUpdateCount}; health={Player.statLife}");
                 Decision = null;
@@ -155,8 +149,6 @@ public sealed class CombatPlayer : ModPlayer
                 Status = "waiting for boss";
                 return;
             }
-            if (IsTwins(_snapshot)) _snapshot = _snapshot with { Leg = _stroke.State(Player, _snapshot) };
-            else _stroke.Reset();
             _cancellation?.Dispose();
             _cancellation = new CancellationTokenSource();
             Mod.Logger.Info($"state #{_snapshot.Sequence}: tick={_snapshot.Tick}; player={_snapshot.Player.Center}; health={_snapshot.Health}/{_snapshot.MaxHealth}; bosses={_snapshot.Bosses.Count}; parts={_snapshot.Parts.Count}; projectiles={_snapshot.Projectiles.Count}");
@@ -188,15 +180,7 @@ public sealed class CombatPlayer : ModPlayer
 
         if (DodgeEnabled && Decision != null && !manualMovementInput)
         {
-            DodgeIntent intent = Decision.Intent;
-            if (IsTwins(_snapshot))
-            {
-                string transition = _stroke.Update(Player, _snapshot, 0);
-                if (transition.Length > 0)
-                    Mod.Logger.Info($"stroke #{Decision.Sequence}: {transition}; player={Player.Center}");
-                intent = _stroke.Resolve(intent, Player, _snapshot);
-            }
-            LastAction = _movement.Apply(Player, intent,
+            LastAction = _movement.Apply(Player, Decision.Intent,
                 _snapshot with { Sequence = Decision.Sequence });
             if (_lastAppliedSequence != Decision.Sequence)
             {
@@ -280,20 +264,11 @@ public sealed class CombatPlayer : ModPlayer
             ? LastAction.Applied : DodgeIntent.Idle;
         _lastCompletedDurationMs = Decision is null ? 0 : previousAgeMs;
         Decision = answer;
-        if (IsTwins(_snapshot))
-        {
-            int vertical = answer.Intent.Direction is DodgeDirection.Up or DodgeDirection.UpLeft or DodgeDirection.UpRight
-                ? -1 : answer.Intent.Direction is DodgeDirection.Down or DodgeDirection.DownLeft or DodgeDirection.DownRight
-                    ? 1 : 0;
-            string transition = _stroke.Update(Player, _snapshot, vertical);
-            if (transition.Length > 0)
-                Mod.Logger.Info($"stroke #{answer.Sequence}: {transition}; player={Player.Center}");
-        }
         _activeSince = Stopwatch.GetTimestamp();
         Status = "acting";
         Mod.Logger.Info($"decision #{answer.Sequence}: {answer.Intent}; " +
             $"latency={answer.LatencyMs}ms; previous_action={previousAgeMs}ms; probabilities={JsonSerializer.Serialize(answer.Probabilities)}");
-        DodgeIntent shown = IsTwins(_snapshot) ? _stroke.Resolve(answer.Intent, Player, _snapshot) : answer.Intent;
+        DodgeIntent shown = answer.Intent;
         string direction = shown.Direction switch
         {
             DodgeDirection.Up => "↑",
@@ -306,15 +281,12 @@ public sealed class CombatPlayer : ModPlayer
             DodgeDirection.UpLeft => "↖",
             _ => "·"
         };
-        Main.NewText($"[Jev #{answer.Sequence}] {direction} H:{shown.HorizontalSize} V:{shown.VerticalSize}" +
-            (shown.Dash ? " dash" : "") + $" {answer.LatencyMs}ms", Color.Orange);
-    }
-
-    private static bool IsTwins(CombatSnapshot snapshot)
-    {
-        foreach (CombatEntity boss in snapshot.Bosses)
-            if (boss.Name is "Spazmatism" or "Retinazer") return true;
-        return false;
+        bool phaseTwo = _snapshot.Bosses.Any(boss => boss.Name == "Spazmatism" &&
+            _snapshot.BossMotion.Any(motion => motion.Id == boss.Id && motion.MaxHealth > 0 &&
+                motion.Health * 100 <= motion.MaxHealth * 40));
+        Main.NewText($"[Jev{(phaseTwo ? " P2" : "")} #{answer.Sequence}] {direction} H:{shown.HorizontalSize} V:{shown.VerticalSize}" +
+            (shown.Dash ? " dash" : "") + $" {answer.LatencyMs}ms",
+            phaseTwo ? Color.MediumPurple : Color.Orange);
     }
 
     public override void OnHurt(Player.HurtInfo info)

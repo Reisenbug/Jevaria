@@ -165,9 +165,7 @@ public sealed class GameMovement : IMovementDriver
             reason = "hook deferred while mounted";
         }
         bool verticalHook = vertical < 0 && verticalSize >= Magnitude.Medium &&
-            !_autoMountActive && (_autoHookActive ||
-                player.velocity.Y > -MountEntrySpeed &&
-                (snapshot.Leg.Sign == 0 || snapshot.Leg.ProgressCells <= 6f));
+            !_autoMountActive && (_autoHookActive || player.velocity.Y > -MountEntrySpeed);
         bool wantHook = !downMount && (horizontalHook || verticalHook);
         bool hookJump = _autoHookActive && _hookLatchedTick > 0 &&
             player.grapCount > 0 && Main.GameUpdateCount > _hookLatchedTick;

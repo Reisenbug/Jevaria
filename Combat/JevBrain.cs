@@ -30,11 +30,13 @@ public sealed class JevariaConfig : ModConfig
         "Attack Spazmatism first, but dodge both eyes. Avoid body contact. " +
         "In phase one, move up and down while increasing distance from Spazmatism. " +
         "Do not run horizontally toward it. " +
-        "Spazmatism enters phase two at 40 percent health. In phase two, keep trending " +
-        "toward more than 35 cells of separation; if closer, quickly move away. " +
+        "Spazmatism enters phase two at 40 percent health. In phase two, pull away " +
+        "horizontally from Spazmatism and aim to stay more than 35 cells away. " +
+        "Use vertical movement to dodge a charge, fire, or another immediate threat, " +
+        "not as a constant up-down pattern. Large is useful when it actually clears danger. " +
         "Leave its continuous fire stream immediately. " +
         "It then charges six times, aiming at my position when each charge starts. " +
-        "Change both horizontal and vertical direction to dodge each fast charge; " +
+        "Change direction after a fast charge starts to dodge it; " +
         "do not keep running straight while it catches me. " +
         "Leave walls, the floor, the ceiling, and world edges early. " +
         "Never let Spazmatism pin me against a boundary; gain vertical room before crossing past it. " +
@@ -66,27 +68,6 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
             : new Dictionary<string, string> { [snapshot.Boss.Name] = string.IsNullOrWhiteSpace(config.GeneralInstruction)
                 ? JevariaConfig.DefaultGeneralInstruction : config.GeneralInstruction };
         var options = snapshot.AvailableActions.ToDictionary(option => ActionName(option.Intent));
-        var directions = snapshot.AvailableActions.GroupBy(option => option.Intent.Direction)
-            .ToDictionary(group => group.Key, group => group.ToArray());
-        if (twins)
-        {
-            var routes = directions.Where(group => Components(group.Key).Y != 0 &&
-                (snapshot.Leg.Sign == 0 || Components(group.Key).Y == snapshot.Leg.Sign ||
-                 snapshot.Leg.CanReverse)).ToDictionary(group => group.Key, group => group.Value);
-            if (routes.Count > 0) directions = routes;
-        }
-        var twinRoutes = new Dictionary<string, DodgeIntent>();
-        if (twins)
-            foreach (var (routeDirection, candidates) in directions)
-            {
-                (int x, int y) = Components(routeDirection);
-                twinRoutes[routeDirection.ToString()] = new DodgeIntent(routeDirection,
-                    x == 0 ? Magnitude.None : Magnitude.Small,
-                    y == 0 ? Magnitude.None : Magnitude.Small, false);
-                if (candidates.Any(candidate => candidate.Intent.VerticalSize == Magnitude.Large))
-                    twinRoutes[$"{routeDirection}Burst"] = new DodgeIntent(routeDirection,
-                        x == 0 ? Magnitude.None : Magnitude.Small, Magnitude.Large, false);
-            }
         bool pillion = snapshot.MountType == MountID.QueenSlime;
         string mountName = pillion ? "Gelatinous Pillion" : "Slimy Saddle";
         string mountSteering = pillion
@@ -129,34 +110,17 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
                 above = Room(snapshot.SolidDistances.Up, snapshot.WorldDistances.Up),
                 below = Room(snapshot.SolidDistances.Down, snapshot.WorldDistances.Down)
             },
-            vertical_leg = twins ? new
-            {
-                direction = snapshot.Leg.Sign < 0 ? "up" : snapshot.Leg.Sign > 0 ? "down" : "uncommitted",
-                progress_cells = (int)snapshot.Leg.ProgressCells,
-                remaining_cells = (int)snapshot.Leg.RemainingCells,
-                can_reverse_for_threat = snapshot.Leg.CanReverse
-            } : null,
             boss_notes = bossNotes
         };
         var questions = new Dictionary<string, object>
         {
-            ["direction"] = Choice(twins
-                ? $"Choose a broad escape corridor from boss bodies and projectile lanes, with room to keep moving afterward. Favor a substantial vertical sweep over tiny repeated reversals; do not thread narrow gaps or automatically return toward the ceiling. Route descriptions give rough separation trends and projectile exposure, not exact collision predictions. Burst amplifies existing upward speed with {mountName}, while downward Burst mounts immediately. Use the stronger move to clear danger quickly. Spazmatism enters phase two at 40 percent health: keep trending beyond 35 cells away and rapidly increase separation when closer."
-                : "Choose a broad route away from boss bodies and projectile lanes. Check each route's rough boss clearance trend and remaining room, including where I will be when this answer arrives. Do not move toward a nearby boss body or enter a wall or ceiling when another escape route exists. Preserve room to continue dodging after this interval. These projections are coarse and bosses may change speed.",
-                twins ? twinRoutes.ToDictionary(route => route.Key,
-                    route => RouteDescription(route.Value.Direction, snapshot,
-                        route.Value.VerticalSize == Magnitude.Large)) :
-                    directions.ToDictionary(group => group.Key.ToString(),
-                        group => RouteDescription(group.Key, snapshot, false)))
+            ["action"] = Choice(
+                "Choose one complete dodge action for the next reaction interval. Compare every boss body and approaching projectile, then choose a route with room to keep escaping. Pick horizontal, vertical, or diagonal movement as the situation requires. Use a hook or mount when its extra displacement actually helps; avoid repeating a tool just because it worked before. Route estimates are rough.",
+                snapshot.AvailableActions.ToDictionary(option => ActionName(option.Intent),
+                    option => RouteDescription(option.Intent.Direction, snapshot,
+                        option.Intent.HorizontalSize, option.Intent.VerticalSize == Magnitude.Large) +
+                        " " + ActionDescription(option, mountName, mountSteering)))
         };
-        foreach (var (route, candidates) in twins ? new Dictionary<DodgeDirection, DodgeOption[]>() : directions)
-        {
-            if (candidates.Length == 1) continue;
-            questions[$"tool_{route}"] = Choice(
-                $"Assume I move {route} for the next reaction interval. Choose a movement tool that clears the boss body and projectile lanes with room to keep escaping. Use ordinary movement when its displacement is enough; use a stronger vertical move when a slow route would remain inside the danger area. A hook briefly latches, then jumps free after one or two frames. {mountName} gives fast vertical travel. {mountSteering}, so check ceiling and floor room.",
-                candidates.ToDictionary(option => ActionName(option.Intent),
-                    option => ActionDescription(option, mountName, mountSteering)));
-        }
         string stateJson = JsonSerializer.Serialize(state);
         Terraria.ModLoader.ModContent.GetInstance<Jevaria>().Logger.Info(
             $"jev state #{snapshot.Sequence}: {stateJson}");
@@ -182,32 +146,16 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
         timer.Stop();
 
         JsonElement answers = body.RootElement.GetProperty("answers");
-        string chosenDirection = ChoiceValue(answers, "direction");
-        if (twins)
-        {
-            if (!twinRoutes.TryGetValue(chosenDirection, out DodgeIntent intent))
-                throw new FormatException($"unknown route: {chosenDirection}");
-            var routeProbabilities = new Dictionary<string, float>();
-            foreach (JsonProperty value in answers.GetProperty("direction").GetProperty("probabilities").EnumerateObject())
-                routeProbabilities[value.Name] = value.Value.GetSingle();
-            return new DodgeDecision(intent,
-                new Dictionary<string, IReadOnlyDictionary<string, float>> { ["direction"] = routeProbabilities },
-                timer.ElapsedMilliseconds, snapshot.Sequence);
-        }
-        if (!Enum.TryParse(chosenDirection, out DodgeDirection direction) ||
-            !directions.TryGetValue(direction, out DodgeOption[]? actions))
-            throw new FormatException($"unknown direction: {chosenDirection}");
-        string chosenAction = actions.Length == 1 ? ActionName(actions[0].Intent) :
-            ChoiceValue(answers, $"tool_{direction}");
+        string chosenAction = ChoiceValue(answers, "action");
         if (!options.TryGetValue(chosenAction, out DodgeOption chosen))
             throw new FormatException($"unknown action: {chosenAction}");
 
         var probabilities = new Dictionary<string, IReadOnlyDictionary<string, float>>();
         var values = new Dictionary<string, float>();
-        if (actions.Length == 1) values[chosenAction] = 1f;
-        else foreach (JsonProperty value in answers.GetProperty($"tool_{direction}")
+        foreach (JsonProperty value in answers.GetProperty("action")
             .GetProperty("probabilities").EnumerateObject())
             values[value.Name] = value.Value.GetSingle();
+        var directionProbabilities = new Dictionary<string, float>();
         var horizontalProbabilities = new Dictionary<string, float>();
         var verticalProbabilities = new Dictionary<string, float>();
         var toolProbabilities = new Dictionary<string, float>();
@@ -220,13 +168,11 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
             bool mount = option.Intent.VerticalSize == Magnitude.Large;
             string tool = mount && option.HookDistanceCells is not null ? "HookAndMount" :
                 mount ? "Mount" : option.HookDistanceCells is not null ? "Hook" : "Ordinary";
+            AddProbability(directionProbabilities, option.Intent.Direction.ToString(), probability);
             AddProbability(horizontalProbabilities, horizontal, probability);
             AddProbability(verticalProbabilities, vertical, probability);
             AddProbability(toolProbabilities, tool, probability);
         }
-        var directionProbabilities = new Dictionary<string, float>();
-        foreach (JsonProperty value in answers.GetProperty("direction").GetProperty("probabilities").EnumerateObject())
-            directionProbabilities[value.Name] = value.Value.GetSingle();
         probabilities["direction"] = directionProbabilities;
         probabilities["action"] = values;
         probabilities["horizontal"] = horizontalProbabilities;
@@ -261,11 +207,12 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
             $"Move {vertical} and {horizontal}.";
     }
 
-    private static string RouteDescription(DodgeDirection direction, CombatSnapshot snapshot, bool burst)
+    private static string RouteDescription(DodgeDirection direction, CombatSnapshot snapshot,
+        Magnitude horizontalSize, bool burst)
     {
         if (direction == DodgeDirection.Stay) return DirectionDescription(direction);
         (int x, int y) = Components(direction);
-        float horizontal = x == 0 ? 0f : 12f * x;
+        float horizontal = x == 0 ? 0f : (horizontalSize == Magnitude.Medium ? 20f : 12f) * x;
         float horizontalRoom = x < 0
             ? Room(snapshot.SolidDistances.Left, snapshot.WorldDistances.Left) - GameMovement.HorizontalReserveCells
             : Room(snapshot.SolidDistances.Right, snapshot.WorldDistances.Right) - GameMovement.HorizontalReserveCells;
@@ -301,9 +248,6 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
                 y == 0 ? "Ordinary horizontal travel. " : "Ordinary vertical travel. ") +
             $"Boss clearance trend: {(bossClearance.Length == 0 ? "no nearby boss" : bossClearance)}. " +
             $"Projectile corridor: {(exposed == 0 ? "clear" : exposed < 3 ? "exposed" : "crowded")}. " +
-            (snapshot.Leg.Sign == 0 ? "" : y != snapshot.Leg.Sign
-                ? "This reverses the current vertical leg. "
-                : "This continues the current vertical leg. ") +
             $"Available room beyond reserve: horizontal {(x == 0 ? 0f : Math.Max(0f, horizontalRoom)):0}, " +
             $"vertical {(y == 0 ? 0f : Math.Max(0f, verticalRoom)):0} cells.";
     }
