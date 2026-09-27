@@ -12,7 +12,7 @@ Jev 驱动的 Terraria Boss 战实验模组。Jev 每次选择一条躲避方向
 玩家按下移动、跳跃、钩爪、坐骑或使用物品按键时，手动输入优先；Jevaria 不会清除原版按键状态。松开手动输入后自动操作恢复。
 Boss 出现时自动选中快捷栏 0–9 格里最靠前的武器；手动切换物品后不再抢回。战斗结束且仍持有自动选中的武器时，恢复战前物品。
 
-双子魔眼在场时使用 `Instruction`，其他 Boss 使用 `GeneralInstruction`。两者都可在 tModLoader 的 `JevariaConfig` 客户端配置中修改。第一轮目标为双子魔眼，移动装备为翅膀、二段跳和钩爪；装备 Slimy Saddle 或 Gelatinous Pillion 时增加垂直 Large 动作。武器为飞镖手枪，飞镖种类由当前弹药决定。
+魔焰眼存活时使用 `Instruction`；魔焰眼被击败、只剩激光眼时使用 `RetinazerInstruction`；其他 Boss 使用 `GeneralInstruction`。这些提示词都可在 tModLoader 的 `JevariaConfig` 客户端配置中修改。第一轮目标为双子魔眼，移动装备为翅膀、二段跳和钩爪；装备 Slimy Saddle 或 Gelatinous Pillion 时增加垂直 Large 动作。武器为飞镖手枪，飞镖种类由当前弹药决定。
 
 ## 当前实现
 

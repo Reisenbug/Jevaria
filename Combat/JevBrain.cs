@@ -44,8 +44,15 @@ public sealed class JevariaConfig : ModConfig
         "Never let Spazmatism pin me against a boundary; gain vertical room before crossing past it. " +
         "Never run straight toward Spazmatism.";
 
+    public const string DefaultRetinazerInstruction =
+        "Spazmatism is defeated. Attack Retinazer. Keep moving when its body approaches " +
+        "and leave room to dodge its charges. Body contact matters more than lasers. " +
+        "Use horizontal, vertical, or diagonal movement according to the actual threat; " +
+        "do not repeat Large moves without a reason.";
+
     public string GeneralInstruction = DefaultGeneralInstruction;
     public string Instruction = DefaultInstruction;
+    public string RetinazerInstruction = DefaultRetinazerInstruction;
 }
 
 public sealed class JevBrain : IDodgeBrain, IDisposable
@@ -65,14 +72,13 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
         JevariaConfig config = Terraria.ModLoader.ModContent.GetInstance<JevariaConfig>();
         bool twins = snapshot.Bosses.Any(boss => boss.Name is "Spazmatism" or "Retinazer");
         bool spazmatismAlive = snapshot.Bosses.Any(boss => boss.Name == "Spazmatism");
-        string twinsInstruction = string.IsNullOrWhiteSpace(config.Instruction)
-            ? JevariaConfig.DefaultInstruction : config.Instruction;
         var bossNotes = twins
             ? new Dictionary<string, string> { [spazmatismAlive ? "Spazmatism" : "Retinazer"] =
-                spazmatismAlive ? twinsInstruction :
-                "Spazmatism is defeated. Only Retinazer remains. Ignore all Spazmatism-specific " +
-                "advice below. Attack Retinazer and preserve room to evade its body charges. " +
-                twinsInstruction }
+                spazmatismAlive
+                    ? string.IsNullOrWhiteSpace(config.Instruction)
+                        ? JevariaConfig.DefaultInstruction : config.Instruction
+                    : string.IsNullOrWhiteSpace(config.RetinazerInstruction)
+                        ? JevariaConfig.DefaultRetinazerInstruction : config.RetinazerInstruction }
             : new Dictionary<string, string> { [snapshot.Boss.Name] = string.IsNullOrWhiteSpace(config.GeneralInstruction)
                 ? JevariaConfig.DefaultGeneralInstruction : config.GeneralInstruction };
         var options = snapshot.AvailableActions.ToDictionary(option => ActionName(option.Intent));
