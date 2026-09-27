@@ -6,6 +6,7 @@ namespace Jevaria.Combat;
 
 public sealed class VerticalStroke
 {
+    private const float MinimumEmergencyStrokeCells = 8f;
     private const float MinimumStrokeCells = 15f;
     private int _sign;
     private float _startY;
@@ -25,7 +26,8 @@ public sealed class VerticalStroke
         float remaining = Math.Max(0f, (_targetY - player.Center.Y) * _sign / 16f);
         float progress = Math.Max(0f, (player.Center.Y - _startY) * _sign / 16f);
         return new VerticalLeg(_sign, _targetY, remaining, progress,
-            progress >= MinimumStrokeCells || ImmediateThreat(snapshot) ||
+            progress >= MinimumStrokeCells ||
+            progress >= MinimumEmergencyStrokeCells && ImmediateThreat(snapshot) ||
             _sign < 0 && player.velocity.Y > 0.5f && !snapshot.CanFly && !snapshot.CanDoubleJump);
     }
 

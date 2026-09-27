@@ -208,7 +208,8 @@ public sealed class CombatPlayer : ModPlayer
             {
                 _lastActionReason = LastAction.Reason;
                 if (_lastActionReason.Length > 0)
-                    Mod.Logger.Info($"action #{Decision.Sequence}: {_lastActionReason}; applied={LastAction.Applied}");
+                    Mod.Logger.Info($"action #{Decision.Sequence}: {_lastActionReason}; " +
+                        $"applied={LastAction.Applied}; velocity={Player.velocity}");
             }
             if (LastAction.Reason == "grapple")
             {

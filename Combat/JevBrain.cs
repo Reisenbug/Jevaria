@@ -135,7 +135,7 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
         var questions = new Dictionary<string, object>
         {
             ["direction"] = Choice(twins
-                ? "Choose a route and speed that avoids both eyes and incoming fire. Keep changing height, but do not automatically turn back toward the ceiling. Reverse a vertical leg when the other direction gives safer separation after a meaningful displacement. Burst uses Slimy Saddle for fast vertical travel; use it when ordinary travel is too slow to escape, not merely because it is available. Spazmatism enters phase two at 40 percent health: keep trending beyond 35 cells away and rapidly increase separation when closer. The listed displacements are approximate."
+                ? "Choose a broad escape corridor from boss bodies and projectile lanes, with room to keep moving afterward. Favor a substantial vertical sweep over tiny repeated reversals; do not thread narrow gaps or automatically return toward the ceiling. Route descriptions give rough separation trends and projectile exposure, not exact collision predictions. Burst amplifies existing upward speed with Slimy Saddle, while downward Burst mounts immediately. Use the stronger move to clear danger quickly. Spazmatism enters phase two at 40 percent health: keep trending beyond 35 cells away and rapidly increase separation when closer."
                 : "Choose the safest movement direction for the next reaction interval. Compare every boss body and projectile, their motion and damage, and room near solid and world boundaries. Frames until contact assumes current velocities remain constant. Preserve an escape route and vary height when a pursuer would catch sustained horizontal running. Follow the boss notes. All listed directions have at least one available action.",
                 twins ? twinRoutes.ToDictionary(route => route.Key,
                     route => RouteDescription(route.Value.Direction, snapshot,
@@ -262,9 +262,33 @@ public sealed class JevBrain : IDodgeBrain, IDisposable
             : Room(snapshot.SolidDistances.Down, snapshot.WorldDistances.Down) - GameMovement.LowerReserveCells;
         float travelEstimate = burst ? (y < 0 ? 18f : 22f) : (y < 0 ? 10f : 18f);
         float vertical = y * Math.Max(0f, Math.Min(travelEstimate, verticalRoom));
+        Vector2 displacement = new(horizontal * 16f, vertical * 16f);
+        string bossClearance = string.Join("; ", snapshot.Bosses
+            .Where(boss => Vector2.Distance(boss.Center, snapshot.Player.Center) < 70f * 16f)
+            .Select(boss =>
+            {
+                float current = Vector2.Distance(boss.Center, snapshot.Player.Center);
+                float after = Vector2.Distance(boss.Center, snapshot.Player.Center + displacement);
+                return $"{boss.Name}: {(after - current > 5f * 16f ? "opens space" :
+                    after - current < -5f * 16f ? "closes space" : "little separation change")}";
+            }));
+        int exposed = 0;
+        foreach (CombatEntity projectile in snapshot.Projectiles)
+        {
+            Vector2 relative = projectile.Center - snapshot.Player.Center;
+            Vector2 relativeStep = projectile.Velocity - displacement / 36f;
+            float speedSquared = relativeStep.LengthSquared();
+            float frame = speedSquared < 0.01f ? 36f :
+                Math.Clamp(-Vector2.Dot(relative, relativeStep) / speedSquared, 4f, 36f);
+            if ((relative + relativeStep * frame).LengthSquared() < 10f * 16f * 10f * 16f)
+                exposed++;
+        }
         return $"{DirectionDescription(direction)} Approximate displacement over 0.6 seconds: " +
             $"{horizontal:0} cells right, {vertical:0} cells down. " +
-            (burst ? "Fast vertical travel with Slimy Saddle. " : "Ordinary vertical travel. ") +
+            (burst ? "Mount for faster vertical travel while holding W or S. " :
+                "Ordinary vertical travel. ") +
+            $"Boss clearance trend: {(bossClearance.Length == 0 ? "no nearby boss" : bossClearance)}. " +
+            $"Projectile corridor: {(exposed == 0 ? "clear" : exposed < 3 ? "exposed" : "crowded")}. " +
             (snapshot.Leg.Sign != 0 && y != snapshot.Leg.Sign
                 ? "This reverses the current vertical leg. "
                 : "This continues the current vertical leg. ") +

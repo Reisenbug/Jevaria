@@ -8,6 +8,7 @@ namespace Jevaria.Combat;
 
 public sealed class GameMovement : IMovementDriver
 {
+    private const float MountEntrySpeed = 4f;
     public const int HorizontalReserveCells = 35;
     public const int UpperReserveCells = 18;
     public const int LowerReserveCells = 4;
@@ -88,6 +89,7 @@ public sealed class GameMovement : IMovementDriver
     private bool _autoMountActive;
     private bool _autoMountForDown;
     private bool _mountRiseSeen;
+    private bool _mountFallSeen;
     private ulong _mountStartTick;
     private ulong _upMountSequence;
 
@@ -131,8 +133,11 @@ public sealed class GameMovement : IMovementDriver
             horizontalSize = Magnitude.Small;
             reason = "horizontal grapple unavailable while mounted";
         }
-        if (_autoMountActive && downMount) _autoMountForDown = true;
+        if (_autoMountActive && (!player.mount.Active || player.mount.Type != MountID.Slime))
+            DismountAuto(player);
         if (_autoMountActive && ((!upMount && !downMount) || upMount && _autoMountForDown ||
+            downMount && !_autoMountForDown ||
+            _autoMountForDown && _mountFallSeen && player.velocity.Y <= 0f ||
             !_autoMountForDown && (_mountRiseSeen && player.velocity.Y >= 0f ||
             !_mountRiseSeen && Main.GameUpdateCount - _mountStartTick > 6)))
         {
@@ -143,7 +148,16 @@ public sealed class GameMovement : IMovementDriver
         if (horizontal == 0) horizontalSize = Magnitude.None;
         if (vertical == 0) verticalSize = Magnitude.None;
         bool horizontalHook = horizontal != 0 && horizontalSize == Magnitude.Medium;
-        bool verticalHook = vertical < 0 && verticalSize >= Magnitude.Medium;
+        if (_autoMountActive && horizontalHook)
+        {
+            horizontalSize = Magnitude.Small;
+            horizontalHook = false;
+            reason = "hook deferred while mounted";
+        }
+        bool verticalHook = vertical < 0 && verticalSize >= Magnitude.Medium &&
+            !_autoMountActive && (_autoHookActive ||
+                player.velocity.Y > -MountEntrySpeed &&
+                (snapshot.Leg.Sign == 0 || snapshot.Leg.ProgressCells <= 6f));
         bool wantHook = !downMount && (horizontalHook || verticalHook);
         bool hookJump = _autoHookActive && _hookLatchedTick > 0 &&
             player.grapCount > 0 && Main.GameUpdateCount > _hookLatchedTick;
@@ -225,8 +239,7 @@ public sealed class GameMovement : IMovementDriver
         player.controlJump = hookJump || ApplyJump(player, canJump && vertical < 0,
             useExtraJump, snapshot.Sequence);
         if (upMount && !_autoMountActive && _upMountSequence != snapshot.Sequence &&
-            player.controlJump && (player.velocity.Y <= 0f || hookFinished) &&
-            (!_autoHookActive && player.grapCount == 0 || hookFinished))
+            player.velocity.Y <= -MountEntrySpeed && !_autoHookActive && player.grapCount == 0)
         {
             if (MountAuto(player, false))
             {
@@ -239,7 +252,9 @@ public sealed class GameMovement : IMovementDriver
                 reason = "slime mount unavailable";
             }
         }
-        if (downMount && !_autoMountActive)
+        else if (upMount && !_autoMountActive && !_autoHookActive && reason.Length == 0)
+            reason = "slime waiting for upward speed";
+        if (downMount && !_autoMountActive && !_autoHookActive && player.grapCount == 0)
         {
             if (MountAuto(player, true)) reason = "slime mount descent";
             else
@@ -250,6 +265,8 @@ public sealed class GameMovement : IMovementDriver
         }
         if (_autoMountActive && !_autoMountForDown && player.velocity.Y < -0.1f)
             _mountRiseSeen = true;
+        if (_autoMountActive && _autoMountForDown && player.velocity.Y > 0.1f)
+            _mountFallSeen = true;
         var applied = new DodgeIntent(Compose(horizontal, vertical), horizontalSize, verticalSize, false);
         return new ActionResult(intent, applied, reason);
     }
@@ -306,12 +323,17 @@ public sealed class GameMovement : IMovementDriver
     private bool MountAuto(Player player, bool down)
     {
         if (player.mount.Active || !player.mount.CanMount(MountID.Slime, player)) return false;
+        float entrySpeed = player.velocity.Y;
         player.mount.SetMount(MountID.Slime, player);
         if (!player.mount.Active || player.mount.Type != MountID.Slime) return false;
         _autoMountActive = true;
         _autoMountForDown = down;
         _mountRiseSeen = false;
+        _mountFallSeen = false;
         _mountStartTick = Main.GameUpdateCount;
+        Terraria.ModLoader.ModContent.GetInstance<Jevaria>().Logger.Info(
+            $"slime mount: tick={Main.GameUpdateCount}; direction={(down ? "down" : "up")}; " +
+            $"velocity_before={entrySpeed:0.00}; velocity_after={player.velocity.Y:0.00}");
         return true;
     }
 
@@ -323,6 +345,7 @@ public sealed class GameMovement : IMovementDriver
         _autoMountActive = false;
         _autoMountForDown = false;
         _mountRiseSeen = false;
+        _mountFallSeen = false;
     }
 
     private bool ApplyJump(Player player, bool rise, bool hop, ulong sequence)
